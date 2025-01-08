@@ -1,17 +1,13 @@
-# filepath: /c:/Users/crouxel/AppData/Documents/PROJECTS/SmartFurnace/initialize_db.py
 import sqlite3
 
-# Read the SQL commands from the A2.sql file
-with open('A2.sql', 'r') as file:
-    sql_commands = file.read()
+def run_sql_file(filename):
+    conn = sqlite3.connect('SmartFurnace.db')
+    cursor = conn.cursor()
+    with open(filename, 'r') as sql_file:
+        sql_script = sql_file.read()
+    cursor.executescript(sql_script)
+    conn.commit()
+    conn.close()
 
-# Connect to the database
-conn = sqlite3.connect('SmartFurnace.db')
-cursor = conn.cursor()
-
-# Execute the SQL commands
-cursor.executescript(sql_commands)
-
-# Commit the changes and close the connection
-conn.commit()
-conn.close()
+if __name__ == "__main__":
+    run_sql_file('A2.sql')
