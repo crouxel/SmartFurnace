@@ -1,11 +1,12 @@
 import sqlite3
 from datetime import datetime, timedelta
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.animation as animation
 import os
+import re
 
 # File to store the start cycle time
 START_CYCLE_FILE = 'start_cycle_time.txt'
@@ -89,7 +90,7 @@ def animate(i):
         current_time = datetime.now()
         elapsed_time = (current_time - start_time).total_seconds() / 60  # in minutes
 
-        cycles = fetch_schedule()
+        cycles = fetch_schedule(schedule_var.get())
         times = []
         temps = []
         total_time = 0
@@ -134,6 +135,90 @@ def animate(i):
     except ValueError:
         pass
 
+def add_schedule():
+    def save_schedule():
+        schedule_name = schedule_name_entry.get()
+        if not schedule_name:
+            messagebox.showerror("Error", "Schedule name cannot be empty")
+            return
+
+        # Validate cycle time format
+        time_pattern = re.compile(r'^\d{2}:\d{2}:\d{2}$')
+        for i in range(len(cycle_entries)):
+            cycle_time = cycle_entries[i][3].get()
+            if not time_pattern.match(cycle_time):
+                messagebox.showerror("Error", f"Invalid time format for cycle {i+1}. Please use HH:MM:SS format.")
+                return
+
+        # Connect to the database
+        conn = sqlite3.connect('SmartFurnace.db')
+        cursor = conn.cursor()
+
+        # Create a new table for the schedule
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schedule_name} (
+                Cycle INTEGER PRIMARY KEY,
+                StartTemp REAL,
+                EndTemp REAL,
+                CycleType TEXT,
+                CycleTime TEXT,
+                Notes TEXT
+            )
+        """)
+
+        # Insert the entered values into the new table
+        for i in range(len(cycle_entries)):
+            cycle = i + 1
+            start_temp = cycle_entries[i][0].get()
+            end_temp = cycle_entries[i][1].get()
+            cycle_type = cycle_entries[i][2].get()
+            cycle_time = cycle_entries[i][3].get()
+            notes = cycle_entries[i][4].get()
+            cursor.execute(f"""
+                INSERT INTO {schedule_name} (Cycle, StartTemp, EndTemp, CycleType, CycleTime, Notes)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (cycle, start_temp, end_temp, cycle_type, cycle_time, notes))
+
+        conn.commit()
+        conn.close()
+
+        # Update the dropdown menu
+        schedule_menu['values'] = list(schedule_menu['values']) + [schedule_name]
+        add_schedule_window.destroy()
+
+    add_schedule_window = tk.Toplevel(root)
+    add_schedule_window.title("Add Schedule")
+
+    tk.Label(add_schedule_window, text="Schedule Name:").grid(row=0, column=0, padx=5, pady=5)
+    schedule_name_entry = tk.Entry(add_schedule_window)
+    schedule_name_entry.grid(row=0, column=1, padx=5, pady=5)
+
+    tk.Label(add_schedule_window, text="Cycle").grid(row=1, column=0, padx=5, pady=5)
+    tk.Label(add_schedule_window, text="Start Temp [°C]").grid(row=1, column=1, padx=5, pady=5)
+    tk.Label(add_schedule_window, text="End Temp [°C]").grid(row=1, column=2, padx=5, pady=5)
+    tk.Label(add_schedule_window, text="Cycle Type").grid(row=1, column=3, padx=5, pady=5)
+    tk.Label(add_schedule_window, text="Cycle Time (HH:MM:SS)").grid(row=1, column=4, padx=5, pady=5)
+    tk.Label(add_schedule_window, text="Notes").grid(row=1, column=5, padx=5, pady=5)
+
+    cycle_entries = []
+    for i in range(10):  # Assuming a maximum of 10 cycles for simplicity
+        cycle_entries.append([
+            tk.Entry(add_schedule_window),
+            tk.Entry(add_schedule_window),
+            ttk.Combobox(add_schedule_window, values=["Ramp", "Soak"]),
+            tk.Entry(add_schedule_window),
+            tk.Entry(add_schedule_window)
+        ])
+        cycle_entries[-1][0].grid(row=i+2, column=1, padx=5, pady=5)
+        cycle_entries[-1][1].grid(row=i+2, column=2, padx=5, pady=5)
+        cycle_entries[-1][2].grid(row=i+2, column=3, padx=5, pady=5)
+        cycle_entries[-1][3].grid(row=i+2, column=4, padx=5, pady=5)
+        cycle_entries[-1][4].grid(row=i+2, column=5, padx=5, pady=5)
+        tk.Label(add_schedule_window, text=str(i+1)).grid(row=i+2, column=0, padx=5, pady=5)
+
+    save_button = tk.Button(add_schedule_window, text="Save Schedule", command=save_schedule)
+    save_button.grid(row=12, column=0, columnspan=6, pady=10)
+
 # Create the main window
 root = tk.Tk()
 root.title("Smart Furnace Control")
@@ -150,8 +235,16 @@ start_cycle_button.pack(side=tk.LEFT, padx=5)
 schedule_label = ttk.Label(control_frame, text="Select Schedule:")
 schedule_label.pack(side=tk.LEFT, padx=5)
 schedule_var = tk.StringVar(value="A2")
-schedule_menu = ttk.Combobox(control_frame, textvariable=schedule_var, values=["A2"])
+schedule_menu = ttk.Combobox(control_frame, textvariable=schedule_var, values=["A2", "Add Schedule"])
 schedule_menu.pack(side=tk.LEFT, padx=5)
+
+# Bind the selection event to open the add schedule form
+def on_schedule_select(event):
+    if schedule_var.get() == "Add Schedule":
+        add_schedule()
+        schedule_var.set("A2")  # Reset the selection to a valid schedule
+
+schedule_menu.bind("<<ComboboxSelected>>", on_schedule_select)
 
 # Create a label to display the start time
 start_time_label = ttk.Label(root, text="Start Time: N/A")
@@ -178,6 +271,12 @@ ani = animation.FuncAnimation(fig, animate, interval=1000)
 
 # Start the temperature update loop
 update_temperature_label()
+
+# Handle window close event to ensure database connection is closed
+def on_closing():
+    root.destroy()
+
+root.protocol("WM_DELETE_WINDOW", on_closing)
 
 # Start the Tkinter main loop
 root.mainloop()
