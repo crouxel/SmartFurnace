@@ -97,46 +97,50 @@ class DatabaseManager:
                 conn.close()
 
     @classmethod
-    def save_schedule(cls, schedule_name: str, entries: list) -> bool:
-        """Save a schedule to the database."""
+    def save_schedule(cls, name: str, entries: List[Tuple]) -> bool:
+        """Save a schedule to the database.
+        
+        Args:
+            name: Name of the schedule
+            entries: List of tuples in format (CycleType, StartTemp, EndTemp, Duration, Notes)
+                    DO NOT PASS DICTIONARIES - Must be tuples in exact order above
+        Returns:
+            bool: True if save successful, False otherwise
+        """
+        logger.debug(f"Saving schedule '{name}' with {len(entries)} entries")
+        
         try:
-            conn = sqlite3.connect(cls.DB_NAME)
-            cursor = conn.cursor()
-            
-            # Drop existing table if it exists
-            cursor.execute(f"DROP TABLE IF EXISTS {schedule_name}")
-            
-            # Create new table
-            cursor.execute(f"""
-                CREATE TABLE {schedule_name} (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    Cycle INTEGER NOT NULL,
-                    CycleType TEXT NOT NULL,
-                    StartTemp INTEGER NOT NULL,
-                    EndTemp INTEGER NOT NULL,
-                    CycleTime TEXT NOT NULL,
-                    Notes TEXT
-                )
-            """)
-
-            # Insert entries with Cycle number
-            for i, entry in enumerate(entries, 1):  # Start counting from 1
-                cursor.execute(f"""
-                    INSERT INTO {schedule_name} 
-                    (Cycle, CycleType, StartTemp, EndTemp, CycleTime, Notes)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (i,) + entry)
-
-            conn.commit()
-            return True
-            
-        except sqlite3.Error as e:
-            logger.error(f"Error saving schedule '{schedule_name}': {e}")
+            with cls.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # First, ensure the schedule exists in schedules table
+                cursor.execute("""
+                    INSERT OR REPLACE INTO schedules (name, modified_date)
+                    VALUES (?, CURRENT_TIMESTAMP)
+                """, (name,))
+                
+                # Get the schedule_id
+                cursor.execute("SELECT id FROM schedules WHERE name = ?", (name,))
+                schedule_id = cursor.fetchone()[0]
+                
+                # Clear existing entries for this schedule
+                cursor.execute("DELETE FROM schedule_entries WHERE schedule_id = ?", (schedule_id,))
+                
+                # Insert new entries
+                for position, entry in enumerate(entries):
+                    cursor.execute("""
+                        INSERT INTO schedule_entries 
+                        (schedule_id, cycle_type, start_temp, end_temp, duration, notes, position)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (schedule_id, *entry, position))
+                
+                conn.commit()
+                logger.debug(f"Successfully saved schedule '{name}'")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error saving schedule '{name}': {e}", exc_info=True)
             return False
-            
-        finally:
-            if conn:
-                conn.close()
 
     @classmethod
     def delete_schedule(cls, schedule_name: str) -> bool:
@@ -158,33 +162,44 @@ class DatabaseManager:
     def load_schedule(cls, schedule_name: str) -> List[Dict]:
         """Load a schedule from the database."""
         try:
-            conn = sqlite3.connect(cls.DB_NAME)
-            cursor = conn.cursor()
-            
-            # Get all entries from the schedule
-            cursor.execute(f"""
-                SELECT Cycle, CycleType, StartTemp, EndTemp, CycleTime, Notes 
-                FROM {schedule_name} 
-                ORDER BY Cycle
-            """)
-            
-            entries = []
-            for row in cursor.fetchall():
-                entries.append({
-                    'Cycle': row[0],
-                    'CycleType': row[1],
-                    'StartTemp': row[2],
-                    'EndTemp': row[3],
-                    'CycleTime': row[4],
-                    'Notes': row[5] if row[5] else ''
-                })
-            
-            return entries
-            
-        except sqlite3.Error as e:
-            logger.error(f"Error loading schedule '{schedule_name}': {e}")
+            with cls.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get schedule ID
+                cursor.execute("SELECT id FROM schedules WHERE name = ?", (schedule_name,))
+                schedule_id = cursor.fetchone()
+                
+                if not schedule_id:
+                    logger.warning(f"No schedule found with name: {schedule_name}")
+                    return None
+                    
+                # Get entries for this schedule
+                cursor.execute("""
+                    SELECT 
+                        position as Cycle,
+                        cycle_type as CycleType,
+                        start_temp as StartTemp,
+                        end_temp as EndTemp,
+                        duration as CycleTime,
+                        notes as Notes
+                    FROM schedule_entries 
+                    WHERE schedule_id = ?
+                    ORDER BY position
+                """, (schedule_id[0],))
+                
+                entries = []
+                for row in cursor.fetchall():
+                    entries.append({
+                        'Cycle': row[0] + 1,  # Convert 0-based position to 1-based cycle
+                        'CycleType': row[1],
+                        'StartTemp': row[2],
+                        'EndTemp': row[3],
+                        'CycleTime': row[4],
+                        'Notes': row[5] if row[5] else ''
+                    })
+                
+                return entries
+                
+        except Exception as e:
+            logger.error(f"Error loading schedule '{schedule_name}': {e}", exc_info=True)
             return None
-            
-        finally:
-            if conn:
-                conn.close()

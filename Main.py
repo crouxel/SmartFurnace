@@ -16,6 +16,10 @@ from constants import (WINDOW_SIZE, BUTTON_WIDTH, COMBO_WIDTH,
                       PLOT_UPDATE_INTERVAL, MAX_PLOT_POINTS, 
                       DEFAULT_TEMP, ERROR_MESSAGES)
 import platform
+import logging
+from schedule_window import schedule_window
+
+logger = logging.getLogger(__name__)
 
 class MainWindow(QWidget):
     def __init__(self):
@@ -240,67 +244,42 @@ class MainWindow(QWidget):
         return self.start_cycle_time
 
     def update_graph(self):
-        """Update the graph display."""
-        print("update_graph called")  # Debug print
-        if not self.current_schedule:  # Add guard clause
-            print("No current schedule")  # Debug print
+        """Update the graph with current temperature and schedule."""
+        try:
+            # Clear the plot
             self.plot_widget.clear()
-            self.temp_display.setText("---°C")
-            return
-
-        if self.start_cycle_time is None:
-            print("Setting start cycle time")  # Debug print
-            self.start_cycle_time = self.get_start_cycle_time()
-
-        elapsed_time = (datetime.now() - self.start_cycle_time).total_seconds() / 60
-        self.plot_widget.clear()
-        
-        theme = get_plot_theme()
-        
-        # Plot the schedule curve
-        x_data = []
-        y_data = []
-        current_time = 0
-        current_temp = self.current_schedule[0]['StartTemp']
-        
-        for cycle in self.current_schedule:
-            cycle_time_minutes = self.time_to_minutes(cycle['CycleTime'])
-            x_data.extend([current_time, current_time + cycle_time_minutes])
-            y_data.extend([current_temp, cycle['EndTemp']])
-            current_time += cycle_time_minutes
-            current_temp = cycle['EndTemp']
-        
-        print(f"Plotting data: x={x_data}, y={y_data}")  # Debug print
-        
-        if x_data and y_data:
-            x_padding = max(x_data) * 0.1
-            y_padding = (max(y_data) - min(y_data)) * 0.1
-            self.plot_widget.setXRange(-x_padding, max(x_data) + x_padding)
-            self.plot_widget.setYRange(min(y_data) - y_padding, max(y_data) + y_padding)
-            self.plot_widget.plot(x_data, y_data, pen=pg.mkPen(color='r', width=2))
-        
-        # Calculate total duration
-        total_duration = sum(self.time_to_minutes(cycle['CycleTime']) for cycle in self.current_schedule)
-        
-        # Add current time line
-        self.plot_widget.addLine(
-            x=elapsed_time, 
-            pen=pg.mkPen(theme['current_time'], width=2, style=Qt.DashLine)
-        )
-
-        # Update temperature display
-        current_temp = self.get_current_temperature(elapsed_time)
-        if current_temp is not None:
-            self.temp_display.setText(f"{current_temp:.0f}°C")
-        else:
-            self.temp_display.setText("---°C")
-
-        # Update time labels
-        if self.current_schedule:
-            start_time = self.get_start_cycle_time()
-            end_time = start_time + timedelta(minutes=total_duration)
-            self.start_time_label.setText(f"Start: {start_time.strftime('%I:%M:%S %p')}")
-            self.end_time_label.setText(f"End: {end_time.strftime('%I:%M:%S %p')}")
+            
+            # Get current time and temperature
+            current_time = datetime.now()
+            
+            if self.current_schedule and self.start_cycle_time:
+                # Plot schedule
+                x_data = []
+                y_data = []
+                current_time_minutes = 0
+                
+                # Plot schedule data
+                for cycle in self.current_schedule:
+                    cycle_time_minutes = self.time_to_minutes(cycle['CycleTime'])
+                    x_data.extend([current_time_minutes, current_time_minutes + cycle_time_minutes])
+                    y_data.extend([cycle['StartTemp'], cycle['EndTemp']])
+                    current_time_minutes += cycle_time_minutes
+                
+                # Plot the schedule line
+                self.plot_widget.plot(x_data, y_data, pen={'color': 'g', 'width': 2})
+                
+                # Add vertical line for current time if cycle has started
+                if self.start_cycle_time:
+                    elapsed_minutes = (current_time - self.start_cycle_time).total_seconds() / 60
+                    self.plot_widget.addLine(x=elapsed_minutes, pen={'color': 'y', 'width': 2, 'style': Qt.DashLine})
+                
+                # Update temperature display
+                current_temp = self.get_current_temperature(elapsed_minutes)
+                if current_temp is not None:
+                    self.temp_display.setText(f"{current_temp:.1f}°C")
+                
+        except Exception as e:
+            print(f"Error updating graph: {e}")
 
     def get_current_temperature(self, elapsed_time):
         """Get the current temperature based on elapsed time."""
@@ -332,26 +311,24 @@ class MainWindow(QWidget):
     def on_table_select(self):
         """Handle schedule selection from combo box."""
         selected_table = self.combo.currentText()
-        print(f"on_table_select called with: {selected_table}")  # Debug print
+        logger.debug(f"on_table_select called with: {selected_table}")
         
         if selected_table == "Add Schedule":
             try:
-                print("Attempting to open ScheduleWindow")  # Debug print
-                from schedule_window import ScheduleWindow
-                self.schedule_window = ScheduleWindow(parent=self)
-                print("Created ScheduleWindow instance")  # Debug print
-                self.schedule_window.exec_()
-                print("ScheduleWindow closed")  # Debug print
-                self.update_schedule_menu()
+                logger.debug("Opening schedule_window in Add mode")
+                self.schedule_window = schedule_window(self)
+                logger.debug("Created schedule_window instance")
+                if self.schedule_window.exec_():
+                    logger.debug("Schedule window accepted, updating menu")
+                    self.update_schedule_menu()
+                else:
+                    logger.debug("Schedule window cancelled")
             except Exception as e:
-                print(f"Error in on_table_select: {e}")  # Debug print
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error in on_table_select: {e}", exc_info=True)
                 QMessageBox.critical(self, "Error", f"Failed to open schedule window: {str(e)}")
         else:
-            print(f"Loading schedule: {selected_table}")  # Debug print
-            self.current_schedule = DatabaseManager.load_schedule(selected_table)
-            self.update_graph()  # Changed from regenerate_graph()
+            logger.debug(f"Loading existing schedule: {selected_table}")
+            self.load_schedule(selected_table)
 
     def show_context_menu(self, position):
         """Show context menu for schedule operations."""
@@ -379,51 +356,23 @@ class MainWindow(QWidget):
     def edit_schedule(self):
         """Edit the currently selected schedule."""
         schedule_name = self.combo.currentText()
+        logger.debug(f"edit_schedule called for: {schedule_name}")
+        
         if schedule_name and schedule_name != "Add Schedule":
             try:
-                print(f"Editing schedule: {schedule_name}")  # Debug print
-                data = DatabaseManager.load_schedule(schedule_name)
-                print(f"Loaded data from database: {data}")  # Debug print
+                logger.debug(f"Opening schedule_window in Edit mode for: {schedule_name}")
+                self.schedule_window = schedule_window(self, schedule_name)
                 
-                if data:
-                    from schedule_window import ScheduleWindow
-                    self.schedule_window = ScheduleWindow(parent=self)
-                    # Convert data to match ScheduleWindow's expected format
-                    schedule_data = []
-                    print(f"Converting data format...")  # Debug print
-                    for row in data:
-                        print(f"Processing row: {row}")  # Debug print
-                        schedule_data.append({
-                            'CycleType': row['CycleType'],
-                            'StartTemp': float(row['StartTemp']),
-                            'EndTemp': float(row['EndTemp']),
-                            'CycleTime': row['CycleTime'],
-                            'Notes': row.get('Notes', '')
-                        })
-                    print(f"Converted data: {schedule_data}")  # Debug print
-                    
-                    self.schedule_window.load_data(schedule_data)
-                    print("Data loaded into schedule window")  # Debug print
-                    
-                    if self.schedule_window.exec_():
-                        entries = self.schedule_window.validate_and_collect_entries()
-                        print(f"Collected entries: {entries}")  # Debug print
-                        
-                        if entries and DatabaseManager.save_schedule(schedule_name, entries):
-                            self.update_schedule_menu()
-                            self.combo.setCurrentText(schedule_name)
-                            self.current_schedule = entries
-                            self.update_graph()
-                        else:
-                            print("Failed to save schedule")  # Debug print
-                            QMessageBox.critical(self, "Error", "Failed to save schedule")
+                if self.schedule_window.exec_():
+                    logger.debug("Schedule edit accepted, updating UI")
+                    self.update_schedule_menu()
+                    self.combo.setCurrentText(schedule_name)
+                    self.load_schedule(schedule_name)
                 else:
-                    print("No data returned from database")  # Debug print
-                    QMessageBox.warning(self, "Error", "Failed to load schedule data")
+                    logger.debug("Schedule edit cancelled")
+                    
             except Exception as e:
-                print(f"Exception in edit_schedule: {str(e)}")  # Debug print
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Exception in edit_schedule: {str(e)}", exc_info=True)
                 QMessageBox.critical(self, "Error", f"Failed to edit schedule: {str(e)}")
 
     def show_options(self):
@@ -449,28 +398,34 @@ class MainWindow(QWidget):
         self.plot_widget.getAxis('left').setPen(theme['grid'])
 
     def load_schedule(self, schedule_name):
-        """Load a schedule and show its graph."""
+        """Load a schedule and update the display."""
+        logger.debug(f"Loading schedule: {schedule_name}")
         try:
             self.current_schedule = []
             data = DatabaseManager.load_schedule(schedule_name)
+            logger.debug(f"Loaded data from database: {data}")
+            
             if data:
-                print(f"Loading schedule data: {data}")  # Debug print
                 for row in data:
-                    # Data is already in dictionary format, no need to reconstruct
+                    logger.debug(f"Processing row: {row}")
                     cycle = {
                         'CycleType': row['CycleType'],
                         'StartTemp': float(row['StartTemp']),
                         'EndTemp': float(row['EndTemp']),
-                        'CycleTime': row['CycleTime']  # Don't convert time here
+                        'CycleTime': row['CycleTime']
                     }
+                    logger.debug(f"Created cycle: {cycle}")
                     self.current_schedule.append(cycle)
-                print(f"Processed schedule: {self.current_schedule}")  # Debug print
-                self.start_cycle_time = self.get_start_cycle_time()  # Reset start time
-                self.update_graph()  # Draw everything
+                
+                logger.debug("Getting start cycle time")
+                self.start_cycle_time = self.get_start_cycle_time()
+                logger.debug(f"Start cycle time: {self.start_cycle_time}")
+                
+                logger.debug("Updating graph")
+                self.update_graph()
                 return True
-            return False
         except Exception as e:
-            print(f"Error loading schedule: {e}")
+            logger.error(f"Error loading schedule: {e}", exc_info=True)
             return False
 
     def setup_schedule_selector(self):
@@ -486,7 +441,7 @@ class MainWindow(QWidget):
         """Handle combo box selection."""
         if text == "Add Schedule":
             try:
-                self.schedule_window = ScheduleWindow(self)  # Create new window
+                self.schedule_window = schedule_window(self)  # Create new window
                 self.schedule_window.exec_()  # Show modal dialog
             except Exception as e:
                 logger.error(f"Failed to open schedule window: {e}")

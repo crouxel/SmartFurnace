@@ -26,30 +26,69 @@ logger = logging.getLogger(__name__)
 # More flexible time pattern that allows single digits
 TIME_PATTERN = re.compile(r'^(\d{1,2}):([0-5]?\d):([0-5]?\d)$')
 
-class ScheduleWindow(QDialog):  # Inherit from QDialog directly
-    def __new__(cls, parent=None, test_mode=False):
-        if test_mode:
-            return super().__new__(cls)
+class schedule_window(QDialog):
+    def __init__(self, parent=None, existing_schedule=None):
+        super().__init__(parent)
+        logger.debug(f"Initializing schedule_window - Mode: {'Edit' if existing_schedule else 'Add'}")
+        
+        # Initialize class attributes
+        self.test_mode = False
+        self.existing_schedule = existing_schedule
+        self.schedule_name = existing_schedule
+        self.schedule_data = None
+        
+        # Set window title based on mode
+        title = "Edit Schedule" if existing_schedule else "Add Schedule"
+        logger.debug(f"Setting window title to: {title}")
+        self.setWindowTitle(title)
+        
+        # Setup main UI (table, etc)
+        self.setup_ui()
+        
+        # Setup different button layouts based on mode
+        logger.debug("Setting up button layout")
+        self.setup_buttons()
+        
+        # Initialize with empty row or load existing data
+        if existing_schedule:
+            logger.debug(f"Loading existing schedule: {existing_schedule}")
+            self.load_schedule(existing_schedule)
         else:
-            return QDialog.__new__(cls, parent)  # Pass parent to QDialog.__new__
-            
-    def __init__(self, parent=None, test_mode=False):
-        if test_mode:
-            self.test_mode = True
-            self.test_cells = {}
-            self.schedule_data = None
+            logger.debug("Adding empty row for new schedule")
+            self.add_empty_row()
+
+    def setup_buttons(self):
+        """Create button layout based on whether we're editing or adding"""
+        logger.debug(f"Setting up buttons for mode: {'Edit' if self.existing_schedule else 'Add'}")
+        button_layout = QHBoxLayout()
+        
+        if self.existing_schedule:
+            logger.debug("Creating Edit mode buttons (Update + Save As)")
+            update_btn = QPushButton("Update")
+            save_as_btn = QPushButton("Save As...")
+            update_btn.clicked.connect(self.update_schedule)
+            save_as_btn.clicked.connect(self.save_as_schedule)
+            button_layout.addWidget(update_btn)
+            button_layout.addWidget(save_as_btn)
         else:
-            super().__init__(parent)  # Call QDialog's __init__
-            self.test_mode = False
-            self.schedule_data = None
-            self.setup_ui()
+            logger.debug("Creating Add mode button (Save)")
+            save_btn = QPushButton("Save")
+            save_btn.clicked.connect(self.save_schedule)
+            button_layout.addWidget(save_btn)
+        
+        logger.debug("Adding Cancel button")
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        logger.debug("Adding button layout to main layout")
+        self.layout().addLayout(button_layout)
 
     def setup_ui(self):
         """Set up the user interface."""
         if self.test_mode:
             return
         
-        self.setWindowTitle("Schedule Editor")
         self.setStyleSheet(get_dialog_style())
         
         # Force text color for all widgets
@@ -63,30 +102,12 @@ class ScheduleWindow(QDialog):  # Inherit from QDialog directly
         layout = QVBoxLayout()
         layout.setSpacing(10)  # Add spacing between elements
         
-        # Set up table with proper column widths
+        # Set up table
         self.table = QTableWidget()
         self.setup_table()
-        self.table.setColumnWidth(0, 100)  # Type
-        self.table.setColumnWidth(1, 100)  # Start Temp
-        self.table.setColumnWidth(2, 100)  # End Temp
-        self.table.setColumnWidth(3, 100)  # Time
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)  # Notes
-        self.table.setColumnWidth(5, 30)   # Add button
         layout.addWidget(self.table)
         
-        # Set up buttons
-        button_layout = QHBoxLayout()
-        save_button = QPushButton("Save")
-        cancel_button = QPushButton("Cancel")
-        
-        save_button.clicked.connect(self.save_as_schedule)
-        cancel_button.clicked.connect(self.reject)
-        
-        for button in [save_button, cancel_button]:
-            button.setStyleSheet(get_button_style())
-            button_layout.addWidget(button)
-            
-        layout.addLayout(button_layout)
+        # Don't create buttons here - they'll be created by setup_buttons()
         self.setLayout(layout)
 
     def setup_table(self):
@@ -190,7 +211,20 @@ class ScheduleWindow(QDialog):  # Inherit from QDialog directly
         try:
             entries = self.validate_and_collect_entries()
             if entries:
-                if DatabaseManager.save_schedule(self.schedule_name, entries):  # Pass dict directly
+                # Convert dictionary entries to tuples in the EXACT format DatabaseManager expects
+                formatted_entries = [
+                    (
+                        entry['CycleType'],
+                        entry['StartTemp'],
+                        entry['EndTemp'],
+                        entry['Duration'],
+                        entry.get('Notes', '')
+                    ) for entry in entries
+                ]
+                
+                logger.debug(f"Formatted entries for database: {formatted_entries}")
+                
+                if DatabaseManager.save_schedule(self.existing_schedule, formatted_entries):
                     QMessageBox.information(self, "Success", SUCCESS_MESSAGES['update_success'])
                     if hasattr(self.parent(), 'update_schedule_menu'):
                         self.parent().update_schedule_menu()
@@ -198,7 +232,7 @@ class ScheduleWindow(QDialog):  # Inherit from QDialog directly
                 else:
                     QMessageBox.critical(self, "Error", ERROR_MESSAGES['save_failed'])
         except Exception as e:
-            print(f"Error updating schedule: {str(e)}")  # Debug print
+            logger.error(f"Error updating schedule: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to update schedule: {str(e)}")
 
     def validate_time_format(self, time_str: str) -> bool:
@@ -240,11 +274,16 @@ class ScheduleWindow(QDialog):  # Inherit from QDialog directly
     def validate_and_collect_entries(self, show_warnings: bool = True) -> Optional[List[Dict]]:
         """Validate and collect all entries from the table.
         
-        Args:
-            show_warnings: Whether to show warning messages for invalid entries
-            
         Returns:
-            List of valid entries or None if validation fails
+            List of dictionaries with keys:
+            - CycleType: str
+            - StartTemp: int
+            - EndTemp: int
+            - Duration: str (HH:MM:SS format)
+            - Notes: str
+            
+        NOTE: These dictionaries must be converted to tuples before saving to database!
+        Use the format: (CycleType, StartTemp, EndTemp, Duration, Notes)
         """
         valid_entries = []
         row_count = self.table.rowCount()
@@ -340,6 +379,33 @@ class ScheduleWindow(QDialog):  # Inherit from QDialog directly
             print(f"Error saving schedule: {str(e)}")  # Debug print
             QMessageBox.critical(self, "Error", f"Failed to save schedule: {str(e)}")
 
+    def save_schedule(self):
+        """Save a new schedule."""
+        try:
+            name, ok = QInputDialog.getText(self, 'Save Schedule', 'Enter schedule name:')
+            if ok and name:
+                entries = self.validate_and_collect_entries()
+                if entries:
+                    # Convert entries to list of tuples for DatabaseManager
+                    formatted_entries = [(
+                        entry['CycleType'],
+                        entry['StartTemp'],
+                        entry['EndTemp'],
+                        entry['Duration'],
+                        entry.get('Notes', '')
+                    ) for entry in entries]
+                    
+                    if DatabaseManager.save_schedule(name, formatted_entries):
+                        QMessageBox.information(self, "Success", SUCCESS_MESSAGES['save_success'])
+                        if hasattr(self.parent(), 'update_schedule_menu'):
+                            self.parent().update_schedule_menu()
+                        self.accept()
+                    else:
+                        QMessageBox.critical(self, "Error", ERROR_MESSAGES['save_failed'])
+        except Exception as e:
+            logger.error(f"Error saving schedule: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to save schedule: {str(e)}")
+
     def get_cell_value(self, row, col):
         """Get cell value (works in both test and normal mode)."""
         if self.test_mode:
@@ -418,35 +484,74 @@ class ScheduleWindow(QDialog):  # Inherit from QDialog directly
             return QDialog.Accepted
         return super().exec_()
 
-def save_schedule(schedule_name, entries):
-    try:
-        conn = sqlite3.connect('SmartFurnace.db')
-        cursor = conn.cursor()
+    def load_schedule(self, schedule_name):
+        """Load an existing schedule into the table."""
+        logger.debug(f"Loading schedule: {schedule_name}")
+        try:
+            # Load data from database
+            data = DatabaseManager.load_schedule(schedule_name)
+            logger.debug(f"Loaded data from database: {data}")
+            
+            if not data:
+                logger.warning(f"No data found for schedule: {schedule_name}")
+                return False
+            
+            # Clear existing rows
+            self.table.setRowCount(0)
+            
+            # Add rows for each cycle
+            for row_data in data:
+                logger.debug(f"Processing row: {row_data}")
+                row = self.add_row()
+                
+                # Set data in the new row
+                cycle_type = self.table.cellWidget(row, 0)
+                start_temp = self.table.cellWidget(row, 1)
+                end_temp = self.table.cellWidget(row, 2)
+                cycle_time = self.table.cellWidget(row, 3)
+                notes = self.table.cellWidget(row, 4)
+                
+                cycle_type.setCurrentText(row_data['CycleType'])
+                start_temp.setText(str(row_data['StartTemp']))
+                end_temp.setText(str(row_data['EndTemp']))
+                cycle_time.setText(str(row_data['CycleTime']))
+                notes.setText(str(row_data.get('Notes', '')))
+                
+                logger.debug(f"Row {row} populated with data")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading schedule: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to load schedule: {str(e)}")
+            return False
 
-        # Create table with the new schedule name
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {schedule_name} (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                Cycle INTEGER NOT NULL,
-                CycleType TEXT NOT NULL,
-                StartTemp INTEGER NOT NULL,
-                EndTemp INTEGER NOT NULL,
-                CycleTime TEXT NOT NULL,
-                Notes TEXT
-            )
-        """)
-
-        # Insert entries with Cycle number
-        for i, entry in enumerate(entries, 1):  # Start counting from 1
-            cursor.execute(f"""
-                INSERT INTO {schedule_name} 
-                (Cycle, CycleType, StartTemp, EndTemp, CycleTime, Notes)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (i,) + entry)
-
-        conn.commit()
-        conn.close()
-        print(f"Schedule {schedule_name} saved successfully.")
-    except sqlite3.Error as e:
-        print(f"An error occurred while saving the schedule: {e}")
-        raise e
+    def add_empty_row(self):
+        """Add an empty row to the table."""
+        logger.debug("Adding empty row to table")
+        current_row = self.table.rowCount()
+        self.table.insertRow(current_row)
+        
+        # Create widgets for the new row
+        cycle_type = QComboBox()
+        cycle_type.addItems(["", "Ramp", "Soak"])
+        cycle_type.setStyleSheet(get_combo_style())
+        
+        start_temp = QLineEdit()
+        end_temp = QLineEdit()
+        cycle_time = QLineEdit()
+        notes = QLineEdit()
+        
+        # Add widgets to the row
+        self.table.setCellWidget(current_row, 0, cycle_type)
+        self.table.setCellWidget(current_row, 1, start_temp)
+        self.table.setCellWidget(current_row, 2, end_temp)
+        self.table.setCellWidget(current_row, 3, cycle_time)
+        self.table.setCellWidget(current_row, 4, notes)
+        
+        # Add the + button in the last column
+        add_btn = QPushButton("+")
+        add_btn.clicked.connect(self.add_empty_row)
+        self.table.setCellWidget(current_row, 5, add_btn)
+        
+        logger.debug(f"Empty row added at index {current_row}")

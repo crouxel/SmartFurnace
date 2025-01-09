@@ -1,6 +1,12 @@
 # Changelog
 
 ## [Unreleased] - 2024-03-19 16:00 UTC
+### Added
+- Current time indicator in schedule graph
+  - Added yellow dashed vertical line showing current position
+  - Helps visualize progress through the schedule
+  - Updates in real-time with temperature display
+
 ### Fixed
 - Bug: Schedule loads but graph doesn't update on GUI open
   - Fixed data format mismatch in load_schedule()
