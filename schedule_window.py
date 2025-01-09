@@ -71,7 +71,7 @@ class ScheduleWindow(QDialog):
         end_temp_item = QTableWidgetItem(str(cycle[2]) if cycle else "")
         self.table.setItem(row, 2, end_temp_item)
 
-        cycle_time_item = QTableWidgetItem(cycle[3] if cycle else "00:00:00")  # Prepopulate with 00:00:00
+        cycle_time_item = QTableWidgetItem(cycle[3] if cycle else "")  # Do not prepopulate with 00:00:00 for new empty row
         self.table.setItem(row, 3, cycle_time_item)
 
         notes_item = QTableWidgetItem(cycle[4] if cycle else "")
@@ -106,6 +106,7 @@ class ScheduleWindow(QDialog):
         cycle_type = self.table.cellWidget(row, 0).currentText()
         start_temp_item = self.table.item(row, 1)
         end_temp_item = self.table.item(row, 2)
+        cycle_time_item = self.table.item(row, 3)
 
         if row > 0:
             prev_end_temp = self.table.item(row - 1, 2).text()
@@ -116,6 +117,14 @@ class ScheduleWindow(QDialog):
             end_temp_item.setFlags(end_temp_item.flags() & ~Qt.ItemIsEditable)
         else:
             end_temp_item.setFlags(end_temp_item.flags() | Qt.ItemIsEditable)
+
+        # Add dummy time when Ramp or Soak is selected
+        if cycle_type in ["Ramp", "Soak"]:
+            cycle_time_item.setText("00:00:00")
+
+        # Add a new row if this is the last row
+        if row == self.table.rowCount() - 1:
+            self.add_empty_row()
 
     def on_cell_changed(self, row, column):
         if row == self.table.rowCount() - 1:
