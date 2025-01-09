@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QLineEdit, QHeaderView, QWidget
 )
 from PyQt5.QtGui import QPalette, QIntValidator
-from PyQt5.QtCore import QObject
+from PyQt5.QtCore import Qt, QObject
 from typing import List, Dict, Optional, Tuple
 
 from styles import (
@@ -26,12 +26,12 @@ logger = logging.getLogger(__name__)
 # More flexible time pattern that allows single digits
 TIME_PATTERN = re.compile(r'^(\d{1,2}):([0-5]?\d):([0-5]?\d)$')
 
-class ScheduleWindow:  # Remove QDialog inheritance for test mode
+class ScheduleWindow(QDialog):  # Inherit from QDialog directly
     def __new__(cls, parent=None, test_mode=False):
         if test_mode:
             return super().__new__(cls)
         else:
-            return super().__new__(QDialog)
+            return QDialog.__new__(cls, parent)  # Pass parent to QDialog.__new__
             
     def __init__(self, parent=None, test_mode=False):
         if test_mode:
@@ -39,7 +39,7 @@ class ScheduleWindow:  # Remove QDialog inheritance for test mode
             self.test_cells = {}
             self.schedule_data = None
         else:
-            QDialog.__init__(self, parent)
+            super().__init__(parent)  # Call QDialog's __init__
             self.test_mode = False
             self.schedule_data = None
             self.setup_ui()

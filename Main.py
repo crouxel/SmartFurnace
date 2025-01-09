@@ -383,22 +383,45 @@ class MainWindow(QWidget):
             try:
                 print(f"Editing schedule: {schedule_name}")  # Debug print
                 data = DatabaseManager.load_schedule(schedule_name)
+                print(f"Loaded data from database: {data}")  # Debug print
+                
                 if data:
                     from schedule_window import ScheduleWindow
                     self.schedule_window = ScheduleWindow(parent=self)
-                    self.schedule_window.load_data(data)
+                    # Convert data to match ScheduleWindow's expected format
+                    schedule_data = []
+                    print(f"Converting data format...")  # Debug print
+                    for row in data:
+                        print(f"Processing row: {row}")  # Debug print
+                        schedule_data.append({
+                            'CycleType': row['CycleType'],
+                            'StartTemp': float(row['StartTemp']),
+                            'EndTemp': float(row['EndTemp']),
+                            'CycleTime': row['CycleTime'],
+                            'Notes': row.get('Notes', '')
+                        })
+                    print(f"Converted data: {schedule_data}")  # Debug print
+                    
+                    self.schedule_window.load_data(schedule_data)
+                    print("Data loaded into schedule window")  # Debug print
+                    
                     if self.schedule_window.exec_():
                         entries = self.schedule_window.validate_and_collect_entries()
+                        print(f"Collected entries: {entries}")  # Debug print
+                        
                         if entries and DatabaseManager.save_schedule(schedule_name, entries):
                             self.update_schedule_menu()
                             self.combo.setCurrentText(schedule_name)
                             self.current_schedule = entries
-                            self.update_graph()  # Changed from regenerate_graph()
+                            self.update_graph()
                         else:
+                            print("Failed to save schedule")  # Debug print
                             QMessageBox.critical(self, "Error", "Failed to save schedule")
                 else:
+                    print("No data returned from database")  # Debug print
                     QMessageBox.warning(self, "Error", "Failed to load schedule data")
             except Exception as e:
+                print(f"Exception in edit_schedule: {str(e)}")  # Debug print
                 import traceback
                 traceback.print_exc()
                 QMessageBox.critical(self, "Error", f"Failed to edit schedule: {str(e)}")
