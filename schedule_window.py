@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout, QComboBox, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout, QComboBox, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView, QInputDialog
 from PyQt5.QtCore import Qt
 import re
 from database import save_schedule, fetch_all_schedules, fetch_schedule, delete_schedule
@@ -17,26 +17,25 @@ class ScheduleWindow(QDialog):
         self.setMinimumSize(800, 600)  # Set minimum size for the window
         layout = QVBoxLayout()
 
-        form_layout = QFormLayout()
-        self.name_edit = QLineEdit(self.table_name if self.table_name else "")
-        form_layout.addRow("Schedule Name:", self.name_edit)
-
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Cycle Type", "Start Temp [°C]", "End Temp [°C]", "Cycle Time (HH:MM:SS)", "Notes"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
 
-        layout.addLayout(form_layout)
         layout.addWidget(self.table)
 
         button_layout = QHBoxLayout()
-        self.save_button = QPushButton("Save")
-        self.cancel_button = QPushButton("Cancel")
+        if self.schedule_data:
+            self.update_button = QPushButton("Update")
+            self.update_button.clicked.connect(self.update_schedule)
+            button_layout.addWidget(self.update_button)
 
-        self.save_button.clicked.connect(self.save_schedule)
+        self.save_as_button = QPushButton("Save as")
+        self.save_as_button.clicked.connect(self.save_as_schedule)
+        self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
 
-        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.save_as_button)
         button_layout.addWidget(self.cancel_button)
 
         layout.addLayout(button_layout)
@@ -132,8 +131,8 @@ class ScheduleWindow(QDialog):
             if cycle_type:
                 self.add_empty_row()
 
-    def save_schedule(self):
-        schedule_name = self.name_edit.text()
+    def update_schedule(self):
+        schedule_name = self.table_name
         if not schedule_name:
             QMessageBox.critical(self, "Error", "Schedule name cannot be empty")
             return
@@ -160,6 +159,42 @@ class ScheduleWindow(QDialog):
 
         # Save the schedule to the database
         save_schedule(schedule_name, valid_entries)
+
+        # Update the dropdown menu if the method exists
+        if hasattr(self.parent(), 'update_schedule_menu'):
+            self.parent().update_schedule_menu()
+        else:
+            print("Warning: Parent widget does not have update_schedule_menu method")
+
+        self.accept()
+
+    def save_as_schedule(self):
+        new_schedule_name, ok = QInputDialog.getText(self, "Save As", "Enter new schedule name:")
+        if not ok or not new_schedule_name:
+            return
+
+        # Validate cycle time format
+        time_pattern = re.compile(r'^\d{2}:\d{2}:\d{2}$')
+        valid_entries = []
+        for row in range(self.table.rowCount() - 1):
+            cycle_type = self.table.cellWidget(row, 0).currentText()
+            start_temp = self.table.item(row, 1).text()
+            end_temp = self.table.item(row, 2).text()
+            cycle_time = self.table.item(row, 3).text()
+            notes = self.table.item(row, 4).text()
+
+            # Skip empty rows
+            if not cycle_type and not start_temp and not end_temp and not cycle_time and not notes:
+                continue
+
+            if not time_pattern.match(cycle_time) or cycle_time == "00:00:00":
+                QMessageBox.critical(self, "Error", f"Invalid time format for cycle {row + 1}. Please use HH:MM:SS format and ensure time is not 00:00:00.")
+                return
+
+            valid_entries.append([row + 1, cycle_type, start_temp, end_temp, cycle_time, notes])
+
+        # Save the schedule to the database with the new name
+        save_schedule(new_schedule_name, valid_entries)
 
         # Update the dropdown menu if the method exists
         if hasattr(self.parent(), 'update_schedule_menu'):

@@ -43,6 +43,9 @@ class MainWindow(QWidget):
         self.timer.timeout.connect(self.update_graph)
         self.timer.start(1000)
 
+        # Initial update to display the current temperature immediately
+        self.update_graph()
+
     def setup_top_layout(self):
         top_layout = QHBoxLayout()
         self.start_button.clicked.connect(self.write_start_cycle_time)
@@ -101,7 +104,7 @@ class MainWindow(QWidget):
 
     def update_graph(self):
         if self.start_cycle_time is None:
-            return
+            self.start_cycle_time = self.get_start_cycle_time()
 
         elapsed_time = (datetime.now() - self.start_cycle_time).total_seconds() / 60  # in minutes
         self.plot_widget.clear()
@@ -179,10 +182,13 @@ class MainWindow(QWidget):
         schedule_data = fetch_schedule_data(table_name)
         edit_window = ScheduleWindow(table_name, schedule_data, parent=self)
         edit_window.exec_()
+        self.update_schedule_menu()
+        self.combo.setCurrentText(table_name)  # Ensure the combo box stays on the same schedule
 
     def open_add_table_window(self):
         add_window = ScheduleWindow(parent=self)
         add_window.exec_()
+        self.update_schedule_menu()
 
     def delete_table(self, table_name):
         try:
