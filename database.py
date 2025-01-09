@@ -21,25 +21,36 @@ def fetch_schedule(schedule):
     return cycles
 
 def save_schedule(schedule_name, cycle_entries):
-    conn = sqlite3.connect('SmartFurnace.db')
-    cursor = conn.cursor()
-    cursor.execute(f"""
+    try:
+        conn = sqlite3.connect('SmartFurnace.db')
+        cursor = conn.cursor()
+
+        # Create table if it doesn't exist
+        cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS {schedule_name} (
-            ID INTEGER PRIMARY KEY AUTOINCREMENT,
-            Cycle INTEGER,
-            StartTemp REAL,
-            EndTemp REAL,
-            CycleType TEXT,
-            CycleTime TEXT,
-            Notes TEXT
+            Id INTEGER PRIMARY KEY,
+            Cycle INTEGER NOT NULL,
+            StartTemp INTEGER NOT NULL,
+            EndTemp INTEGER NOT NULL,
+            CycleType TEXT NOT NULL,
+            CycleTime TIME NOT NULL,
+            Notes TEXT NOT NULL
         )
-    """)
-    cursor.executemany(f"""
-        INSERT INTO {schedule_name} (Cycle, StartTemp, EndTemp, CycleType, CycleTime, Notes)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, cycle_entries)
-    conn.commit()
-    conn.close()
+        """)
+
+        # Clear existing entries
+        cursor.execute(f"DELETE FROM {schedule_name}")
+
+        # Insert new entries
+        cursor.executemany(f"""
+        INSERT INTO {schedule_name} (Cycle, CycleType, StartTemp, EndTemp, CycleTime, Notes)
+        VALUES (?, ?, ?, ?, ?,?)
+        """, cycle_entries)
+
+        conn.commit()
+        conn.close()
+    except sqlite3.OperationalError as e:
+        print(f"Error saving schedule: {e}")
 
 def delete_schedule(schedule_name):
     conn = sqlite3.connect('SmartFurnace.db')
