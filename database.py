@@ -1,26 +1,62 @@
+import os
 import sqlite3
 from typing import List, Tuple, Optional
 import logging
 from contextlib import contextmanager
+from version import APP_NAME
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Set up logging to file in AppData
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(os.getenv('APPDATA'), APP_NAME, 'smartfurnace.log')),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
-    DB_NAME = 'SmartFurnace.db'
+    APP_DATA = os.path.join(os.getenv('APPDATA') or 
+                           os.path.expanduser('~/.local/share'),
+                           APP_NAME)
+    DB_NAME = os.path.join(APP_DATA, 'SmartFurnace.db')
     
+    @classmethod
+    def initialize_database(cls):
+        """Create database directory and file if they don't exist."""
+        try:
+            logger.info(f"Initializing database at {cls.DB_NAME}")
+            os.makedirs(cls.APP_DATA, exist_ok=True)
+            
+            with cls.get_connection() as conn:
+                cursor = conn.cursor()
+                # Create schedules table with proper schema
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS schedules
+                    (
+                        name TEXT PRIMARY KEY,
+                        created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        modified_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+                logger.info("Database initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+            raise
+
     @classmethod
     @contextmanager
     def get_connection(cls):
-        """Context manager for database connections to ensure proper closing."""
+        """Context manager for database connections."""
+        if not os.path.exists(cls.APP_DATA):
+            cls.initialize_database()
+            
         conn = None
         try:
             conn = sqlite3.connect(cls.DB_NAME)
             yield conn
-        except sqlite3.Error as e:
-            logger.error(f"Database connection error: {e}")
-            raise
         finally:
             if conn:
                 conn.close()
@@ -45,10 +81,11 @@ class DatabaseManager:
     def save_schedule(cls, name: str, data: List[Tuple]) -> bool:
         """Save or update a schedule in the database."""
         try:
+            logger.info(f"Attempting to save schedule: {name}")
             with cls.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Create table if it doesn't exist with the correct schema
+                # Create table for this schedule
                 cursor.execute(f"""
                     CREATE TABLE IF NOT EXISTS "{name}" (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,8 +100,9 @@ class DatabaseManager:
                 
                 # Clear existing data
                 cursor.execute(f'DELETE FROM "{name}"')
+                logger.debug(f"Cleared existing data for schedule: {name}")
                 
-                # Insert new data with cycle number
+                # Insert new data
                 for i, entry in enumerate(data, 1):
                     cursor.execute(f"""
                         INSERT INTO "{name}" 
@@ -72,10 +110,15 @@ class DatabaseManager:
                         VALUES (?, ?, ?, ?, ?, ?)
                     """, (i,) + entry)
                 
+                # Update schedules table
+                cursor.execute("""
+                    INSERT OR REPLACE INTO schedules (name) VALUES (?)
+                """, (name,))
+                
                 conn.commit()
                 logger.info(f"Schedule '{name}' saved successfully")
                 return True
-        except sqlite3.Error as e:
+        except Exception as e:
             logger.error(f"Error saving schedule '{name}': {e}")
             return False
 

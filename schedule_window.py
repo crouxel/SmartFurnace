@@ -110,20 +110,39 @@ class ScheduleWindow(QDialog):
         cycle_type = self.table.cellWidget(row, 0).currentText()
         
         if cycle_type in ["Ramp", "Soak"]:
-            # Check if start temperature is empty
+            # Get end temperature from previous row if it exists
+            prev_end_temp = None
+            if row > 0:
+                prev_end_item = self.table.item(row - 1, 2)
+                if prev_end_item and prev_end_item.text():
+                    prev_end_temp = prev_end_item.text()
+            
+            # Set start temperature
             start_temp_item = self.table.item(row, 1)
             if not start_temp_item or not start_temp_item.text():
-                self.table.setItem(row, 1, QTableWidgetItem(str(DEFAULT_TEMP)))
+                # Use previous row's end temp if available, otherwise default
+                new_start_temp = prev_end_temp if prev_end_temp else str(DEFAULT_TEMP)
+                self.table.setItem(row, 1, QTableWidgetItem(new_start_temp))
             
-            # Only set end temperature for Soak
+            # Set end temperature for Soak
             end_temp_item = self.table.item(row, 2)
             if cycle_type == "Soak":
                 if not end_temp_item or not end_temp_item.text():
-                    self.table.setItem(row, 2, QTableWidgetItem(str(DEFAULT_TEMP)))
+                    # For Soak, end temp should match start temp
+                    new_end_temp = self.table.item(row, 1).text()
+                    self.table.setItem(row, 2, QTableWidgetItem(new_end_temp))
             elif cycle_type == "Ramp":
-                # For Ramp, clear end temperature if it's the default value
-                if end_temp_item and end_temp_item.text() == str(DEFAULT_TEMP):
+                if end_temp_item and end_temp_item.text() == self.table.item(row, 1).text():
                     self.table.setItem(row, 2, QTableWidgetItem(""))
+            
+            # Initialize time to 00:00:00
+            time_item = self.table.item(row, 3)
+            if not time_item or not time_item.text():
+                self.table.setItem(row, 3, QTableWidgetItem("00:00:00"))
+            
+            # Add new row if this is the last row
+            if row == self.table.rowCount() - 1:
+                self.add_row()
         else:
             # Clear temperatures if cycle type is cleared
             self.table.setItem(row, 1, QTableWidgetItem(""))

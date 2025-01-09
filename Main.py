@@ -15,10 +15,13 @@ from options_dialog import OptionsDialog
 from constants import (WINDOW_SIZE, BUTTON_WIDTH, COMBO_WIDTH, 
                       PLOT_UPDATE_INTERVAL, MAX_PLOT_POINTS, 
                       DEFAULT_TEMP, ERROR_MESSAGES)
+import platform
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
+        # Initialize database
+        DatabaseManager.initialize_database()
         self.setGeometry(100, 100, *WINDOW_SIZE)
         ThemeManager.initialize()  # Initialize theme from saved settings
         self.start_cycle_time = None
@@ -27,6 +30,14 @@ class MainWindow(QWidget):
         self.apply_theme()  # Make sure we call this
 
     def init_ui(self):
+        # Define font family based on OS
+        if platform.system() == 'Windows':
+            font_family = 'Segoe UI'
+        elif platform.system() == 'Darwin':  # macOS
+            font_family = 'SF Pro'
+        else:  # Linux and others
+            font_family = 'Ubuntu'
+
         # Load the Orbitron font
         font_id = QFontDatabase.addApplicationFont("OrbitronFont.ttf")
         if font_id == -1:

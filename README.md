@@ -39,39 +39,23 @@ H --> L[(SQLite Database)]
 - pyqtgraph
 - SQLite3
 
+## Version
+Current version: 1.0.0
+
 ## Installation
 
-1. Clone the repository:
-``` 
-bash
-git clone https://github.com/yourusername/SmartFurnace.git
-cd SmartFurnace
-```
+1. For developers:
+   ```bash
+   # Clone the repository
+   git clone https://github.com/yourusername/SmartFurnace.git
+   cd SmartFurnace
 
-2. Create and activate virtual environment:
-```
-bash
-python -m venv venv
-source venv/bin/activate # Linux/Mac
-venv\Scripts\activate # Windows
-```
+   # Build executable
+   .\build.bat
+   ```
 
-
-3. Install dependencies:
-```
-pip install -r requirements.txt
-```
-    
-4. Initialize the database:
-```
-bash
-python initialize_db.py
-```
-
-5. Run the application:
-```bash
-python Main.py
-```
+2. For users:
+   Download the latest release from the releases page.
 
 ## Usage
 
