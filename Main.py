@@ -1,7 +1,7 @@
 import sys
 import sqlite3
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                            QPushButton, QLabel, QMenu, QAction, QSizePolicy)
+                            QPushButton, QLabel, QMenu, QAction, QSizePolicy, QMessageBox)
 from PyQt5.QtGui import QIcon, QFontDatabase
 from PyQt5.QtCore import Qt, QTimer, QSize
 from datetime import datetime, timedelta
@@ -292,51 +292,33 @@ class MainWindow(QWidget):
         return 0  # Default temperature if not found
 
     def regenerate_graph(self):
-        selected_table = self.combo.currentText()
-        try:
-            schedule, times, temps, min_temp, max_temp = load_schedule(selected_table)
-            if schedule is None:
-                return
-
-            self.current_schedule = schedule
-            theme = get_plot_theme()
-
-            # Plot temperature curve with enhanced styling
-            self.plot_widget.plot(
-                times, 
-                temps, 
-                pen=pg.mkPen(
-                    color=theme['curve'],
-                    width=3,
-                    style=Qt.SolidLine
-                ),
-                symbol='o',  # Add points at each vertex
-                symbolSize=8,
-                symbolBrush=theme['curve'],
-                symbolPen=None,  # No border on points
-                name='Temperature Schedule'
-            )
-
-            # Set axis ranges with padding
-            y_padding = (max_temp - min_temp) * 0.1  # 10% padding
-            self.plot_widget.setXRange(0, times[-1])
-            self.plot_widget.setYRange(min_temp - y_padding, max_temp + y_padding)
-
-            # Update X-axis with HH:MM format
-            if times and self.start_cycle_time:
-                start_time = self.start_cycle_time
-                x_ticks = []
-                for t in times:
-                    tick_time = start_time + timedelta(minutes=t)
-                    x_ticks.append((t, tick_time.strftime('%H:%M')))
-                
-                self.plot_widget.getAxis('bottom').setTicks([x_ticks])
-
-            # Ensure grid is visible
-            self.plot_widget.getPlotItem().showGrid(x=True, y=True, alpha=0.5)
-
-        except Exception as e:
-            print(f"Error in regenerate_graph: {e}")
+        if not self.current_schedule:
+            return
+        
+        print("Regenerating graph...")  # Debug print
+        self.plot_widget.clear()
+        
+        x_data = []
+        y_data = []
+        current_time = 0
+        current_temp = self.current_schedule[0]['StartTemp']
+        
+        for cycle in self.current_schedule:
+            x_data.extend([current_time, current_time + cycle['CycleTime']])
+            y_data.extend([current_temp, cycle['EndTemp']])
+            current_time += cycle['CycleTime']
+            current_temp = cycle['EndTemp']
+        
+        print(f"Plot data - X: {x_data}, Y: {y_data}")  # Debug print
+        
+        # Set graph range with padding
+        x_padding = max(x_data) * 0.1
+        y_padding = (max(y_data) - min(y_data)) * 0.1
+        self.plot_widget.setXRange(-x_padding, max(x_data) + x_padding)
+        self.plot_widget.setYRange(min(y_data) - y_padding, max(y_data) + y_padding)
+        
+        # Plot the data with a thicker line
+        self.plot_widget.plot(x_data, y_data, pen=pg.mkPen(color='r', width=2))
 
     def on_table_select(self):
         selected_table = self.combo.currentText()
@@ -408,6 +390,48 @@ class MainWindow(QWidget):
         self.plot_widget.getAxis('bottom').setPen(theme['grid'])
         self.plot_widget.getAxis('left').setPen(theme['grid'])
 
+    def load_schedule(self, schedule_name):
+        try:
+            self.current_schedule = []
+            data = DatabaseManager.load_schedule(schedule_name)
+            if data:
+                print(f"Loading schedule data: {data}")  # Debug print
+                for row in data:
+                    cycle = {
+                        'CycleType': row[2],  # Adjusted index for new schema
+                        'StartTemp': float(row[3]),  # Adjusted index
+                        'EndTemp': float(row[4]),
+                        'CycleTime': self.time_to_minutes(row[5])  # Adjusted index
+                    }
+                    self.current_schedule.append(cycle)
+                print(f"Processed schedule: {self.current_schedule}")  # Debug print
+                self.regenerate_graph()
+                return True
+            return False
+        except Exception as e:
+            print(f"Error loading schedule: {e}")  # Debug print
+            return False
+
+    def edit_schedule(self):
+        try:
+            schedule_name = self.combo.currentText()
+            if schedule_name and schedule_name != "Add Schedule":
+                # Add debug logging
+                print(f"Attempting to edit schedule: {schedule_name}")
+                
+                # Load schedule data
+                data = DatabaseManager.load_schedule(schedule_name)
+                if data:
+                    # Create and show schedule window
+                    self.schedule_window = ScheduleWindow(self, schedule_name)
+                    self.schedule_window.load_data(data)
+                    self.schedule_window.exec_()
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to load schedule data")
+        except Exception as e:
+            print(f"Error editing schedule: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to edit schedule: {str(e)}")
+
 def fetch_schedule_data(table_name):
     try:
         conn = sqlite3.connect('SmartFurnace.db')
@@ -419,74 +443,6 @@ def fetch_schedule_data(table_name):
     except sqlite3.OperationalError as e:
         print(f"Error fetching schedule data: {e}")
         return []
-
-def load_schedule(selected_table):
-    global current_schedule
-    try:
-        conn = sqlite3.connect('SmartFurnace.db')
-        cursor = conn.cursor()
-        
-        # Get column names
-        cursor.execute(f"PRAGMA table_info({selected_table})")
-        columns = {row[1]: index for index, row in enumerate(cursor.fetchall())}
-        
-        cursor.execute(f"SELECT * FROM {selected_table}")
-        cycles = cursor.fetchall()
-        conn.close()
-
-        times = []
-        temps = []
-        total_time = 0
-        min_temp = float('inf')
-        max_temp = float('-inf')
-        current_schedule = []
-
-        for cycle in cycles:
-            cycle_dict = {
-                'Id': cycle[columns['Id']],
-                'Cycle': cycle[columns['Cycle']],
-                'StartTemp': cycle[columns['StartTemp']],
-                'EndTemp': cycle[columns['EndTemp']],
-                'CycleType': cycle[columns['CycleType']],
-                'CycleTime': cycle[columns['CycleTime']],
-                'Notes': cycle[columns['Notes']]
-            }
-
-            try:
-                # Parse the time string into a datetime object
-                cycle_time = datetime.strptime(cycle_dict['CycleTime'], "%H:%M:%S")
-                
-                # Calculate total minutes
-                cycle_time_minutes = cycle_time.hour * 60 + cycle_time.minute + cycle_time.second / 60
-                
-                # Update min and max temperatures
-                min_temp = min(min_temp, cycle_dict['StartTemp'], cycle_dict['EndTemp'])
-                max_temp = max(max_temp, cycle_dict['StartTemp'], cycle_dict['EndTemp'])
-                
-                # Append to current_schedule
-                cycle_dict['CycleTime'] = cycle_time_minutes
-                current_schedule.append(cycle_dict)
-                
-                # Append to times and temps for plotting
-                if cycle_dict['CycleType'].lower() == 'ramp':
-                    times.extend([total_time, total_time + cycle_time_minutes])
-                    temps.extend([cycle_dict['StartTemp'], cycle_dict['EndTemp']])
-                elif cycle_dict['CycleType'].lower() == 'soak':
-                    times.extend([total_time, total_time + cycle_time_minutes])
-                    temps.extend([cycle_dict['StartTemp'], cycle_dict['StartTemp']])
-                
-                # Update total_time
-                total_time += cycle_time_minutes
-                
-            except ValueError:
-                print(f"Invalid cycle time format: {cycle_dict['CycleTime']}")
-                continue
-
-        return current_schedule, times, temps, min_temp, max_temp
-
-    except sqlite3.Error as e:
-        print(f"An error occurred: {e}")
-        return None, None, None, None, None
 
 # Initialize the QApplication instance
 app = QApplication(sys.argv)

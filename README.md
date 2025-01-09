@@ -35,27 +35,30 @@ H --> L[(SQLite Database)]
 ## Prerequisites
 
 - Python 3.8 or higher
-- PyQt5
-- pyqtgraph
-- SQLite3
+- PyQt5 >= 5.15.0
+- pyqtgraph >= 0.13.0 (core functionality only)
+- SQLite3 (included with Python)
 
 ## Version
 Current version: 1.0.0
 
 ## Installation
 
-1. For developers:
+1. Clone the repository:
    ```bash
-   # Clone the repository
    git clone https://github.com/yourusername/SmartFurnace.git
    cd SmartFurnace
-
-   # Build executable
-   .\build.bat
    ```
 
-2. For users:
-   Download the latest release from the releases page.
+2. Install dependencies:
+   ```bash
+   pip install PyQt5==5.15.0 pyqtgraph==0.13.0
+   ```
+
+3. Build executable:
+   ```bash
+   .\build.bat
+   ```
 
 ## Usage
 

@@ -11,6 +11,12 @@ from constants import (TIME_PATTERN, TEMP_PATTERN, DEFAULT_TIME,
 import re
 from PyQt5.QtCore import QObject
 from PyQt5.QtGui import QPalette
+import logging
+
+logger = logging.getLogger(__name__)
+
+# More flexible time pattern that allows single digits
+TIME_PATTERN = re.compile(r'^(\d{1,2}):([0-5]?\d):([0-5]?\d)$')
 
 class ScheduleWindow(QDialog):
     def __init__(self, table_name=None, schedule_data=None, parent=None):
@@ -107,46 +113,17 @@ class ScheduleWindow(QDialog):
         self.setup_row(current_row)
 
     def on_cycle_type_changed(self, row):
-        cycle_type = self.table.cellWidget(row, 0).currentText()
-        
-        if cycle_type in ["Ramp", "Soak"]:
-            # Get end temperature from previous row if it exists
-            prev_end_temp = None
-            if row > 0:
-                prev_end_item = self.table.item(row - 1, 2)
-                if prev_end_item and prev_end_item.text():
-                    prev_end_temp = prev_end_item.text()
+        try:
+            cycle_type = self.table.cellWidget(row, 0).currentText()
+            logger.debug(f"Cycle type changed in row {row} to: {cycle_type}")
             
-            # Set start temperature
-            start_temp_item = self.table.item(row, 1)
-            if not start_temp_item or not start_temp_item.text():
-                # Use previous row's end temp if available, otherwise default
-                new_start_temp = prev_end_temp if prev_end_temp else str(DEFAULT_TEMP)
-                self.table.setItem(row, 1, QTableWidgetItem(new_start_temp))
-            
-            # Set end temperature for Soak
-            end_temp_item = self.table.item(row, 2)
-            if cycle_type == "Soak":
-                if not end_temp_item or not end_temp_item.text():
-                    # For Soak, end temp should match start temp
-                    new_end_temp = self.table.item(row, 1).text()
-                    self.table.setItem(row, 2, QTableWidgetItem(new_end_temp))
-            elif cycle_type == "Ramp":
-                if end_temp_item and end_temp_item.text() == self.table.item(row, 1).text():
-                    self.table.setItem(row, 2, QTableWidgetItem(""))
-            
-            # Initialize time to 00:00:00
-            time_item = self.table.item(row, 3)
-            if not time_item or not time_item.text():
-                self.table.setItem(row, 3, QTableWidgetItem("00:00:00"))
-            
-            # Add new row if this is the last row
-            if row == self.table.rowCount() - 1:
-                self.add_row()
-        else:
-            # Clear temperatures if cycle type is cleared
-            self.table.setItem(row, 1, QTableWidgetItem(""))
-            self.table.setItem(row, 2, QTableWidgetItem(""))
+            if cycle_type in ["Ramp", "Soak"]:
+                # Initialize time to 00:00:00
+                time_item = QTableWidgetItem("00:00:00")
+                self.table.setItem(row, 3, time_item)
+                logger.debug(f"Set initial time for row {row}")
+        except Exception as e:
+            logger.error(f"Error in on_cycle_type_changed: {e}")
 
     def update_schedule(self):
         try:
@@ -167,45 +144,125 @@ class ScheduleWindow(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to update schedule: {str(e)}")
             print(f"Error details: {str(e)}")
 
+    def validate_time_format(self, time_str: str) -> bool:
+        """Validate time format and values."""
+        try:
+            logger.debug(f"Validating time format: '{time_str}'")
+            
+            if not time_str:
+                logger.debug("Empty time string")
+                return False
+            
+            # Check pattern match
+            match = TIME_PATTERN.match(time_str)
+            if not match:
+                logger.debug(f"Time string '{time_str}' doesn't match pattern")
+                return False
+            
+            # Get the matched groups
+            hours, minutes, seconds = match.groups()
+            logger.debug(f"Matched groups - H:{hours} M:{minutes} S:{seconds}")
+            
+            # Convert to integers
+            hours = int(hours)
+            minutes = int(minutes)
+            seconds = int(seconds)
+            logger.debug(f"Converted values - H:{hours} M:{minutes} S:{seconds}")
+            
+            # Check ranges
+            if not (0 <= hours <= 99 and 0 <= minutes <= 59 and 0 <= seconds <= 59):
+                logger.debug(f"Time values out of range - H:{hours} M:{minutes} S:{seconds}")
+                return False
+            
+            logger.debug("Time format validation successful")
+            return True
+        except Exception as e:
+            logger.debug(f"Time validation error: {str(e)}")
+            return False
+
     def validate_and_collect_entries(self):
         valid_entries = []
-        for row in range(self.table.rowCount()):
+        row_count = self.table.rowCount()
+        
+        # Log validation process
+        logger.debug(f"Validating {row_count} rows")
+        
+        for row in range(row_count):
+            # Get cycle type
             cycle_widget = self.table.cellWidget(row, 0)
-            if cycle_widget is None or cycle_widget.currentText() == "":
+            if cycle_widget is None:
+                logger.debug(f"Row {row}: No cycle widget")
                 continue
-                
+            
             cycle_type = cycle_widget.currentText()
-            start_temp = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
-            end_temp = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
-            cycle_time = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
-            notes = self.table.item(row, 4).text() if self.table.item(row, 4) else ""
-
-            # Skip empty or incomplete rows
-            if not cycle_type or not start_temp or not end_temp or not cycle_time:
+            if not cycle_type:
+                logger.debug(f"Row {row}: Empty cycle type")
                 continue
-
-            if not validate_time_format(cycle_time):
-                QMessageBox.warning(self, "Error", ERROR_MESSAGES['invalid_time'])
-                return None
 
             try:
-                start_temp = int(start_temp)
-                end_temp = int(end_temp)
-                
-                if not validate_temperature(start_temp) or not validate_temperature(end_temp):
-                    QMessageBox.warning(self, "Error", ERROR_MESSAGES['invalid_temp'])
-                    return None
-                    
-            except ValueError:
-                QMessageBox.warning(self, "Error", ERROR_MESSAGES['invalid_temp'])
-                return None
+                # Get cell values
+                start_temp = self.table.item(row, 1)
+                end_temp = self.table.item(row, 2)
+                cycle_time = self.table.item(row, 3)
+                notes = self.table.item(row, 4)
 
-            valid_entries.append((cycle_type, start_temp, end_temp, cycle_time, notes))
+                # Check if cells exist and have text
+                if not all([start_temp, end_temp, cycle_time]):
+                    logger.debug(f"Row {row}: Missing required fields")
+                    continue
+
+                start_temp_text = start_temp.text().strip()
+                end_temp_text = end_temp.text().strip()
+                cycle_time_text = cycle_time.text().strip()
+                notes_text = notes.text().strip() if notes else ""
+
+                # Skip empty rows
+                if not all([start_temp_text, end_temp_text, cycle_time_text]):
+                    logger.debug(f"Row {row}: Empty required fields")
+                    continue
+
+                # Validate time format
+                if not validate_time_format(cycle_time_text):
+                    QMessageBox.warning(self, "Error", 
+                        f"Invalid time format in row {row + 1}. Use HH:MM:SS")
+                    return None
+
+                # Validate temperatures
+                try:
+                    start_temp_val = int(start_temp_text)
+                    end_temp_val = int(end_temp_text)
+                    
+                    if not (validate_temperature(start_temp_val) and 
+                            validate_temperature(end_temp_val)):
+                        QMessageBox.warning(self, "Error", 
+                            f"Invalid temperature in row {row + 1}")
+                        return None
+                            
+                except ValueError:
+                    QMessageBox.warning(self, "Error", 
+                        f"Invalid temperature format in row {row + 1}")
+                    return None
+
+                # Add valid entry
+                valid_entries.append((
+                    cycle_type, 
+                    start_temp_val, 
+                    end_temp_val, 
+                    cycle_time_text, 
+                    notes_text
+                ))
+                logger.debug(f"Row {row}: Valid entry added")
+
+            except AttributeError as e:
+                logger.error(f"Row {row}: AttributeError - {str(e)}")
+                continue
 
         if not valid_entries:
-            QMessageBox.critical(self, "Error", "No valid entries to save.")
+            QMessageBox.warning(self, "Error", 
+                "No valid entries to save. Please check all required fields.")
             return None
 
+        logger.info(f"Collected {len(valid_entries)} valid entries")
         return valid_entries
 
     def save_as_schedule(self):
