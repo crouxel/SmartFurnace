@@ -6,7 +6,6 @@ from PyQt5.QtGui import QFontDatabase
 from datetime import datetime, timedelta
 import pyqtgraph as pg
 from custom_combobox import CustomComboBox
-from schedule_window import ScheduleWindow
 from styles import get_label_style, get_temp_display_style
 from database import fetch_all_schedules
 
@@ -82,11 +81,16 @@ class MainWindow(QWidget):
         return main_layout
 
     def update_schedule_menu(self):
+        current_text = self.combo.currentText()
         self.combo.clear()
         schedules = fetch_all_schedules()
         self.combo.addItems(schedules)
         self.combo.insertSeparator(len(schedules))
         self.combo.addItem("Add Schedule")
+        if current_text in schedules:
+            self.combo.setCurrentText(current_text)  # Reselect the previously selected schedule
+        else:
+            self.combo.setCurrentIndex(0)  # Select the first valid schedule
 
     def write_start_cycle_time(self):
         self.start_cycle_time = datetime.now()
@@ -178,6 +182,7 @@ class MainWindow(QWidget):
         return menu
 
     def open_edit_table_window(self, table_name):
+        from schedule_window import ScheduleWindow  # Import here to avoid circular import
         # Fetch the schedule data for the selected table
         schedule_data = fetch_schedule_data(table_name)
         edit_window = ScheduleWindow(table_name, schedule_data, parent=self)
@@ -186,9 +191,11 @@ class MainWindow(QWidget):
         self.combo.setCurrentText(table_name)  # Ensure the combo box stays on the same schedule
 
     def open_add_table_window(self):
+        from schedule_window import ScheduleWindow  # Import here to avoid circular import
         add_window = ScheduleWindow(parent=self)
         add_window.exec_()
         self.update_schedule_menu()
+        self.combo.setCurrentIndex(0)  # Select the first valid schedule
 
     def delete_table(self, table_name):
         try:
