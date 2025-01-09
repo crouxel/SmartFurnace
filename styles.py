@@ -321,3 +321,25 @@ def get_dialog_style(theme=None):
             color: {text_color};
         }}
     """
+
+def get_message_box_style():
+    """Get message box style based on current theme."""
+    theme = ThemeManager.get_current_theme()
+    return f"""
+        QMessageBox {{
+            background-color: {theme['background']};
+        }}
+        QMessageBox QLabel {{
+            color: {theme['text']};
+        }}
+        QPushButton {{
+            background-color: {theme['secondary']};
+            color: {theme['text']};
+            border: 1px solid {theme['border']};
+            padding: 5px;
+            min-width: 70px;
+        }}
+        QPushButton:hover {{
+            background-color: {theme['hover']};
+        }}
+    """

@@ -1,7 +1,7 @@
 import sys
 import sqlite3
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                            QPushButton, QLabel, QMenu, QAction, QSizePolicy, QMessageBox)
+                            QPushButton, QLabel, QMenu, QAction, QSizePolicy, QMessageBox, QComboBox)
 from PyQt5.QtGui import QIcon, QFontDatabase
 from PyQt5.QtCore import Qt, QTimer, QSize
 from datetime import datetime, timedelta
@@ -9,7 +9,7 @@ import pyqtgraph as pg
 from custom_combobox import CustomComboBox
 from styles import (get_label_style, get_temp_display_style, get_button_style, 
                    get_combo_style, get_time_label_style, get_plot_theme, 
-                   ThemeManager, get_theme_dependent_styles)
+                   ThemeManager, get_theme_dependent_styles, get_message_box_style)
 from database import DatabaseManager
 from options_dialog import OptionsDialog
 from constants import (WINDOW_SIZE, BUTTON_WIDTH, COMBO_WIDTH, 
@@ -67,6 +67,7 @@ class MainWindow(QWidget):
         self.update_graph()
 
     def setup_top_layout(self):
+        """Set up the top layout with controls."""
         top_layout = QHBoxLayout()
         
         # Create start button with fixed width
@@ -94,21 +95,14 @@ class MainWindow(QWidget):
         self.combo = CustomComboBox(self)
         self.combo.setFixedWidth(COMBO_WIDTH)
         self.combo.setStyleSheet(get_combo_style(embossed=True))
-        self.combo.addItems(DatabaseManager.fetch_all_schedules() + ["Add Schedule"])
+        
+        # Set up combo box items and connection
+        schedules = DatabaseManager.fetch_all_schedules()
+        print(f"Available schedules: {schedules}")  # Debug print
+        self.combo.addItems(schedules)
+        self.combo.insertSeparator(len(schedules))
+        self.combo.addItem("Add Schedule")
         self.combo.currentIndexChanged.connect(self.on_table_select)
-        
-        # Create and set the context menu
-        menu = QMenu(self)
-        edit_action = QAction("Edit Schedule", self)
-        delete_action = QAction("Delete Schedule", self)
-        
-        edit_action.triggered.connect(lambda: self.open_edit_table_window(self.combo.currentText()))
-        delete_action.triggered.connect(lambda: self.delete_table(self.combo.currentText()))
-        
-        menu.addAction(edit_action)
-        menu.addAction(delete_action)
-        
-        self.combo.set_context_menu(menu)
         
         # Add combo box
         top_layout.addWidget(self.combo)
@@ -213,6 +207,7 @@ class MainWindow(QWidget):
         return self.plot_widget
 
     def update_schedule_menu(self):
+        """Update the schedule selector menu."""
         current_text = self.combo.currentText()
         self.combo.clear()
         schedules = DatabaseManager.fetch_all_schedules()
@@ -220,9 +215,9 @@ class MainWindow(QWidget):
         self.combo.insertSeparator(len(schedules))
         self.combo.addItem("Add Schedule")
         if current_text in schedules:
-            self.combo.setCurrentText(current_text)  # Reselect the previously selected schedule
+            self.combo.setCurrentText(current_text)
         else:
-            self.combo.setCurrentIndex(0)  # Select the first valid schedule
+            self.combo.setCurrentIndex(0)
 
     def write_start_cycle_time(self):
         self.start_cycle_time = datetime.now()
@@ -291,7 +286,17 @@ class MainWindow(QWidget):
         
         return 0  # Default temperature if not found
 
+    def time_to_minutes(self, time_str):
+        """Convert HH:MM:SS to minutes."""
+        try:
+            h, m, s = map(int, time_str.split(':'))
+            return h * 60 + m + s / 60
+        except Exception as e:
+            print(f"Error converting time: {e}")
+            return 0
+
     def regenerate_graph(self):
+        """Regenerate the temperature graph."""
         if not self.current_schedule:
             return
         
@@ -304,69 +309,131 @@ class MainWindow(QWidget):
         current_temp = self.current_schedule[0]['StartTemp']
         
         for cycle in self.current_schedule:
-            x_data.extend([current_time, current_time + cycle['CycleTime']])
+            # Use CycleTime instead of Duration
+            cycle_time_minutes = self.time_to_minutes(cycle['CycleTime'])
+            x_data.extend([current_time, current_time + cycle_time_minutes])
             y_data.extend([current_temp, cycle['EndTemp']])
-            current_time += cycle['CycleTime']
+            current_time += cycle_time_minutes
             current_temp = cycle['EndTemp']
         
         print(f"Plot data - X: {x_data}, Y: {y_data}")  # Debug print
         
-        # Set graph range with padding
-        x_padding = max(x_data) * 0.1
-        y_padding = (max(y_data) - min(y_data)) * 0.1
-        self.plot_widget.setXRange(-x_padding, max(x_data) + x_padding)
-        self.plot_widget.setYRange(min(y_data) - y_padding, max(y_data) + y_padding)
-        
-        # Plot the data with a thicker line
-        self.plot_widget.plot(x_data, y_data, pen=pg.mkPen(color='r', width=2))
+        if x_data and y_data:
+            x_padding = max(x_data) * 0.1
+            y_padding = (max(y_data) - min(y_data)) * 0.1
+            self.plot_widget.setXRange(-x_padding, max(x_data) + x_padding)
+            self.plot_widget.setYRange(min(y_data) - y_padding, max(y_data) + y_padding)
+            self.plot_widget.plot(x_data, y_data, pen=pg.mkPen(color='r', width=2))
 
     def on_table_select(self):
+        """Handle schedule selection from combo box."""
         selected_table = self.combo.currentText()
+        print(f"on_table_select called with: {selected_table}")  # Debug print
+        
         if selected_table == "Add Schedule":
-            self.open_add_table_window()
+            try:
+                print("Attempting to open ScheduleWindow")  # Debug print
+                from schedule_window import ScheduleWindow  # Import here to avoid circular import
+                self.schedule_window = ScheduleWindow(parent=self)
+                print("Created ScheduleWindow instance")  # Debug print
+                self.schedule_window.exec_()
+                print("ScheduleWindow closed")  # Debug print
+                self.update_schedule_menu()
+            except Exception as e:
+                print(f"Error in on_table_select: {e}")  # Debug print
+                import traceback
+                traceback.print_exc()  # Print full stack trace
+                QMessageBox.critical(self, "Error", f"Failed to open schedule window: {str(e)}")
         else:
-            self.label.setText(f"Selected table: {selected_table}")
+            print(f"Loading schedule: {selected_table}")  # Debug print
+            self.current_schedule = DatabaseManager.load_schedule(selected_table)
             self.regenerate_graph()
 
-    def show_context_menu(self):
-        print("Creating context menu")
-        menu = QMenu(self.combo)  # Set combo as parent
-        menu.setStyleSheet(get_combo_style())
-        
-        edit_action = QAction("Edit Schedule", menu)
-        delete_action = QAction("Delete Schedule", menu)
-        
-        edit_action.triggered.connect(lambda: self.open_edit_table_window(self.combo.currentText()))
-        delete_action.triggered.connect(lambda: self.delete_table(self.combo.currentText()))
-        
-        menu.addAction(edit_action)
-        menu.addAction(delete_action)
-        
-        print("Menu created with actions")
-        return menu
+    def show_context_menu(self, position):
+        """Show context menu for schedule operations."""
+        current_text = self.combo.currentText()
+        if current_text and current_text != "Add Schedule":
+            menu = QMenu()
+            edit_action = menu.addAction("Edit")
+            delete_action = menu.addAction("Delete")
+            
+            action = menu.exec_(self.combo.mapToGlobal(position))
+            
+            if action == edit_action:
+                self.edit_schedule()
+            elif action == delete_action:
+                self.delete_schedule()
 
-    def open_edit_table_window(self, table_name):
-        from schedule_window import ScheduleWindow  # Import here to avoid circular import
-        # Fetch the schedule data for the selected table
-        schedule_data = fetch_schedule_data(table_name)
-        edit_window = ScheduleWindow(table_name, schedule_data, parent=self)
-        edit_window.exec_()
-        self.update_schedule_menu()
-        self.combo.setCurrentText(table_name)  # Ensure the combo box stays on the same schedule
+    def delete_schedule(self):
+        """Delete the currently selected schedule."""
+        schedule_name = self.combo.currentText()
+        if schedule_name and schedule_name != "Add Schedule":
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle("Delete Schedule")
+            msg_box.setText(f'Are you sure you want to delete "{schedule_name}"?')
+            msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg_box.setDefaultButton(QMessageBox.No)
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #2b2b2b;
+                }
+                QMessageBox QLabel {
+                    color: white;
+                }
+                QPushButton {
+                    background-color: #3d3d3d;
+                    color: white;
+                    border: 1px solid #505050;
+                    padding: 5px;
+                    min-width: 70px;
+                }
+                QPushButton:hover {
+                    background-color: #505050;
+                }
+            """)
+            
+            reply = msg_box.exec_()
+            
+            if reply == QMessageBox.Yes:
+                if DatabaseManager.delete_schedule(schedule_name):
+                    self.update_schedule_menu()
+                    QMessageBox.information(self, "Success", "Schedule deleted successfully")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to delete schedule")
 
-    def open_add_table_window(self):
-        from schedule_window import ScheduleWindow  # Import here to avoid circular import
-        add_window = ScheduleWindow(parent=self)
-        add_window.exec_()
-        self.update_schedule_menu()
-        self.combo.setCurrentIndex(0)  # Select the first valid schedule
-
-    def delete_table(self, table_name):
-        if DatabaseManager.delete_schedule(table_name):
-            print(f"Table {table_name} deleted successfully.")
-            self.update_schedule_menu()
-        else:
-            print(f"Error deleting table {table_name}")
+    def edit_schedule(self):
+        """Edit the currently selected schedule."""
+        schedule_name = self.combo.currentText()
+        if schedule_name and schedule_name != "Add Schedule":
+            try:
+                data = DatabaseManager.load_schedule(schedule_name)
+                if data:
+                    from schedule_window import ScheduleWindow
+                    self.schedule_window = ScheduleWindow(parent=self)
+                    self.schedule_window.load_data(data)
+                    if self.schedule_window.exec_():
+                        entries = self.schedule_window.validate_and_collect_entries()
+                        if entries and DatabaseManager.save_schedule(schedule_name, entries):
+                            self.update_schedule_menu()
+                            self.combo.setCurrentText(schedule_name)
+                            self.current_schedule = entries
+                            self.regenerate_graph()
+                else:
+                    msg = QMessageBox(self)
+                    msg.setIcon(QMessageBox.Warning)
+                    msg.setText("Failed to load schedule data")
+                    msg.setWindowTitle("Error")
+                    msg.setStyleSheet(get_message_box_style())
+                    msg.exec_()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Critical)
+                msg.setText(f"Failed to edit schedule: {str(e)}")
+                msg.setWindowTitle("Error")
+                msg.setStyleSheet(get_message_box_style())
+                msg.exec_()
 
     def show_options(self):
         dialog = OptionsDialog(self)
@@ -412,25 +479,24 @@ class MainWindow(QWidget):
             print(f"Error loading schedule: {e}")  # Debug print
             return False
 
-    def edit_schedule(self):
-        try:
-            schedule_name = self.combo.currentText()
-            if schedule_name and schedule_name != "Add Schedule":
-                # Add debug logging
-                print(f"Attempting to edit schedule: {schedule_name}")
-                
-                # Load schedule data
-                data = DatabaseManager.load_schedule(schedule_name)
-                if data:
-                    # Create and show schedule window
-                    self.schedule_window = ScheduleWindow(self, schedule_name)
-                    self.schedule_window.load_data(data)
-                    self.schedule_window.exec_()
-                else:
-                    QMessageBox.warning(self, "Error", "Failed to load schedule data")
-        except Exception as e:
-            print(f"Error editing schedule: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to edit schedule: {str(e)}")
+    def setup_schedule_selector(self):
+        """Set up the schedule selector combo box."""
+        self.combo = CustomComboBox(self)
+        self.combo.setFixedWidth(COMBO_WIDTH)
+        self.combo.setStyleSheet(get_combo_style(embossed=True))
+        self.combo.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.combo.customContextMenuRequested.connect(self.show_context_menu)
+        self.update_schedule_menu()
+
+    def on_combo_activated(self, text):
+        """Handle combo box selection."""
+        if text == "Add Schedule":
+            try:
+                self.schedule_window = ScheduleWindow(self)  # Create new window
+                self.schedule_window.exec_()  # Show modal dialog
+            except Exception as e:
+                logger.error(f"Failed to open schedule window: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to open schedule window: {str(e)}")
 
 def fetch_schedule_data(table_name):
     try:

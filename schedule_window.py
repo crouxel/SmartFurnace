@@ -1,16 +1,24 @@
-from PyQt5.QtWidgets import (QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout, 
-                            QHBoxLayout, QPushButton, QInputDialog, QMessageBox,
-                            QComboBox, QLineEdit)
-from styles import (ThemeManager, get_dialog_style, get_button_style, 
-                   get_table_style, get_combo_style)
-from database import DatabaseManager
-from constants import (TIME_PATTERN, TEMP_PATTERN, DEFAULT_TIME, 
-                      MIN_TEMP, MAX_TEMP, ERROR_MESSAGES, 
-                      SUCCESS_MESSAGES, validate_time_format, 
-                      validate_temperature, DEFAULT_TEMP)
-import re
+from PyQt5.QtWidgets import (
+    QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout, 
+    QHBoxLayout, QPushButton, QInputDialog, QMessageBox,
+    QComboBox, QLineEdit, QHeaderView, QWidget
+)
+from PyQt5.QtGui import QPalette, QIntValidator
 from PyQt5.QtCore import QObject
-from PyQt5.QtGui import QPalette
+from typing import List, Dict, Optional, Tuple
+
+from styles import (
+    ThemeManager, get_dialog_style, get_button_style, 
+    get_table_style, get_combo_style
+)
+from database import DatabaseManager
+from constants import (
+    TIME_PATTERN, TEMP_PATTERN, DEFAULT_TIME, 
+    MIN_TEMP, MAX_TEMP, ERROR_MESSAGES, 
+    SUCCESS_MESSAGES, validate_time_format, 
+    validate_temperature, DEFAULT_TEMP
+)
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,17 +27,21 @@ logger = logging.getLogger(__name__)
 TIME_PATTERN = re.compile(r'^(\d{1,2}):([0-5]?\d):([0-5]?\d)$')
 
 class ScheduleWindow(QDialog):
-    def __init__(self, table_name=None, schedule_data=None, parent=None):
+    """Window for creating and editing furnace schedules.
+    
+    Attributes:
+        table (QTableWidget): The main table widget for schedule entries
+        parent (QWidget): Parent widget, typically MainWindow
+    """
+    
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        """Initialize the schedule window.
+        
+        Args:
+            parent: Parent widget, typically MainWindow
+        """
         super().__init__(parent)
-        self.table_name = table_name
-        self.schedule_data = schedule_data
-        self.is_new_schedule = table_name is None
-        
-        # Apply theme styles
-        theme = ThemeManager.get_current_theme()
-        self.setStyleSheet(get_dialog_style())
-        
-        self.init_ui()
+        self.setup_ui()
 
     def init_ui(self):
         self.setWindowTitle("Schedule Editor" if self.is_new_schedule else f"Edit Schedule: {self.table_name}")
@@ -38,8 +50,11 @@ class ScheduleWindow(QDialog):
         layout = QVBoxLayout()
 
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Cycle Type", "Start Temp", "End Temp", "Cycle Time", "Notes"])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["Type", "Start °C", "End °C", "Time", "Notes", ""])
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
+        self.table.setColumnWidth(5, 30)
         self.table.setStyleSheet(get_table_style())  # Add table styling
 
         if self.schedule_data:
@@ -119,9 +134,38 @@ class ScheduleWindow(QDialog):
             cycle_type_combo.currentTextChanged.connect(self.auto_populate_first_row)
 
     def add_row(self):
+        """Add a new row to the table."""
         current_row = self.table.rowCount()
-        self.table.setRowCount(current_row + 1)
-        self.setup_row(current_row)
+        self.table.insertRow(current_row)
+        
+        # Create widgets for the new row
+        cycle_type = QComboBox()
+        cycle_type.addItems(["Ramp", "Soak"])
+        cycle_type.currentTextChanged.connect(lambda text: self.auto_populate_first_row(text))
+        
+        start_temp = QLineEdit()
+        end_temp = QLineEdit()
+        cycle_time = QLineEdit()
+        notes = QLineEdit()
+        
+        # Set validators
+        start_temp.setValidator(QIntValidator(MIN_TEMP, MAX_TEMP))
+        end_temp.setValidator(QIntValidator(MIN_TEMP, MAX_TEMP))
+        
+        # Add widgets to the row
+        self.table.setCellWidget(current_row, 0, cycle_type)
+        self.table.setCellWidget(current_row, 1, start_temp)
+        self.table.setCellWidget(current_row, 2, end_temp)
+        self.table.setCellWidget(current_row, 3, cycle_time)
+        self.table.setCellWidget(current_row, 4, notes)
+        
+        # Connect the add row button
+        if current_row == self.table.rowCount() - 1:  # If this is the last row
+            add_row_button = QPushButton("+")
+            add_row_button.clicked.connect(self.add_row)
+            self.table.setCellWidget(current_row, 5, add_row_button)
+        
+        return current_row
 
     def on_cycle_type_changed(self, row):
         try:
@@ -191,7 +235,15 @@ class ScheduleWindow(QDialog):
             logger.debug(f"Time validation error: {str(e)}")
             return False
 
-    def validate_and_collect_entries(self, show_warnings=True):
+    def validate_and_collect_entries(self, show_warnings: bool = True) -> Optional[List[Dict]]:
+        """Validate and collect all entries from the table.
+        
+        Args:
+            show_warnings: Whether to show warning messages for invalid entries
+            
+        Returns:
+            List of valid entries or None if validation fails
+        """
         valid_entries = []
         row_count = self.table.rowCount()
         
@@ -291,6 +343,35 @@ class ScheduleWindow(QDialog):
             if start_temp_edit and cycle_time_edit:
                 start_temp_edit.setText(str(DEFAULT_TEMP))
                 cycle_time_edit.setText(DEFAULT_TIME)
+
+    def load_data(self, data):
+        """Load schedule data into the table."""
+        try:
+            # Clear existing rows except the first one
+            while self.table.rowCount() > 1:
+                self.table.removeRow(1)
+            
+            # Fill data into rows
+            for i, entry in enumerate(data):
+                if i >= self.table.rowCount():
+                    self.add_row()
+            
+                # Set values in cells
+                cycle_type = self.table.cellWidget(i, 0)
+                start_temp = self.table.cellWidget(i, 1)
+                end_temp = self.table.cellWidget(i, 2)
+                cycle_time = self.table.cellWidget(i, 3)
+                notes = self.table.cellWidget(i, 4)
+                
+                cycle_type.setCurrentText(entry['CycleType'])
+                start_temp.setText(str(entry['StartTemp']))
+                end_temp.setText(str(entry['EndTemp']))
+                cycle_time.setText(entry['CycleTime'])
+                notes.setText(entry.get('Notes', ''))
+            
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            raise
 
 def save_schedule(schedule_name, entries):
     try:

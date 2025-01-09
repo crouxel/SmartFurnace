@@ -1,6 +1,4 @@
-PyQt5>=5.15.0
-pyqtgraph>=0.13.0
-PyOpenGL>=3.1.0
-pytest>=7.4.0
-pytest-qt>=4.2.0  # For testing Qt applications
-pytest-mock>=3.11.1  # For mocking functionality
+PyQt5==5.15.9
+pyqtgraph==0.13.3
+pytest==7.4.0
+pytest-qt==4.2.0

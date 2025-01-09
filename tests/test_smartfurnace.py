@@ -5,13 +5,15 @@ test_smartfurnace.py - Progressive test suite
 import pytest
 from pytestqt.qt_compat import qt_api
 from PyQt5.QtCore import QSettings, Qt
-from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtWidgets import QMessageBox, QApplication
+from PyQt5.QtGui import QIntValidator
 import sys
 import os
 
 from styles import Theme, ThemeManager
 from database import DatabaseManager
 from schedule_window import ScheduleWindow
+from Main import MainWindow
 from constants import MIN_TEMP, MAX_TEMP, validate_temperature, validate_time_format, DEFAULT_TEMP, DEFAULT_TIME
 
 @pytest.fixture
@@ -226,3 +228,146 @@ def test_schedule_persistence(qtbot, setup_database):
     assert loaded_data[0]['Notes'] == test_data[4]
     
     new_window.close() 
+
+@pytest.fixture(autouse=True)
+def cleanup_windows():
+    """Fixture to clean up any remaining windows after each test."""
+    yield
+    for window in QApplication.topLevelWidgets():
+        window.close()
+        window.deleteLater()
+    QApplication.processEvents()
+
+def test_add_schedule_functionality(qtbot, setup_database):
+    """Test the complete add schedule workflow."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    
+    try:
+        initial_schedules = DatabaseManager.fetch_all_schedules()
+        initial_count = len(initial_schedules)
+        
+        # Select "Add Schedule"
+        combo = window.combo
+        add_schedule_index = combo.findText("Add Schedule")
+        assert add_schedule_index != -1
+        combo.setCurrentIndex(add_schedule_index)
+        qtbot.wait(100)
+        
+        # Verify schedule window opened
+        assert hasattr(window, 'schedule_window')
+        schedule_window = window.schedule_window
+        
+        # Add test data
+        table = schedule_window.table
+        cycle_type = table.cellWidget(0, 0)
+        start_temp = table.cellWidget(0, 1)
+        end_temp = table.cellWidget(0, 2)
+        cycle_time = table.cellWidget(0, 3)
+        notes = table.cellWidget(0, 4)
+        
+        cycle_type.setCurrentText('Ramp')
+        start_temp.setText('25')
+        end_temp.setText('100')
+        cycle_time.setText('01:00:00')
+        notes.setText('Test ramp')
+        
+        # Save schedule
+        schedule_window.save_schedule("Test Schedule")
+        qtbot.wait(100)
+        
+        # Verify schedule was added
+        final_schedules = DatabaseManager.fetch_all_schedules()
+        assert len(final_schedules) > initial_count
+        
+    finally:
+        window.close()
+        window.deleteLater()
+        QApplication.processEvents()
+
+def test_custom_combobox(qtbot):
+    """Test CustomComboBox functionality."""
+    # Create parent window and combobox
+    window = MainWindow()
+    qtbot.addWidget(window)
+    combo = window.combo
+    
+    # Add test items
+    test_schedule = "Test Schedule"
+    DatabaseManager.save_schedule(test_schedule, [{
+        'CycleType': 'Ramp',
+        'StartTemp': 25,
+        'EndTemp': 100,
+        'Duration': '01:00:00',
+        'Notes': 'Test ramp'
+    }])
+    window.update_schedule_menu()
+    
+    # Test right-click with closed combobox
+    combo.setCurrentText(test_schedule)
+    qtbot.mouseClick(combo, Qt.RightButton)
+    assert combo.context_menu.isVisible()
+    combo.context_menu.hide()
+    
+    # Test right-click with open combobox
+    combo.showPopup()
+    viewport = combo.view().viewport()
+    index = combo.findText(test_schedule)
+    rect = combo.view().visualRect(combo.model().index(index, 0))
+    qtbot.mouseClick(viewport, Qt.RightButton, pos=rect.center())
+    assert combo.context_menu.isVisible()
+    assert combo.currentText() == test_schedule
+    
+    # Clean up
+    window.close()
+    DatabaseManager.delete_schedule(test_schedule) 
+
+def test_schedule_window_basics(qtbot):
+    """Test basic ScheduleWindow functionality."""
+    window = ScheduleWindow()
+    qtbot.addWidget(window)
+    
+    # Test initial state
+    assert window.table.rowCount() == 1, "Should start with one row"
+    assert window.table.columnCount() == 6, "Should have 6 columns"
+    
+    # Test add row functionality
+    add_button = window.table.cellWidget(0, 5)
+    qtbot.mouseClick(add_button, Qt.LeftButton)
+    assert window.table.rowCount() == 2, "Should add a new row"
+    
+    # Test row widgets
+    for row in range(window.table.rowCount()):
+        assert isinstance(window.table.cellWidget(row, 0), QComboBox), f"Row {row} missing cycle type combo"
+        assert isinstance(window.table.cellWidget(row, 1), QLineEdit), f"Row {row} missing start temp input"
+        assert isinstance(window.table.cellWidget(row, 2), QLineEdit), f"Row {row} missing end temp input"
+        assert isinstance(window.table.cellWidget(row, 3), QLineEdit), f"Row {row} missing cycle time input"
+        assert isinstance(window.table.cellWidget(row, 4), QLineEdit), f"Row {row} missing notes input"
+    
+    window.close()
+
+def test_validators(qtbot):
+    """Test input validation."""
+    window = ScheduleWindow()
+    qtbot.addWidget(window)
+    
+    # Get first row widgets
+    start_temp = window.table.cellWidget(0, 1)
+    end_temp = window.table.cellWidget(0, 2)
+    cycle_time = window.table.cellWidget(0, 3)
+    
+    # Test temperature validation
+    start_temp.setText('9999')  # Above MAX_TEMP
+    assert not validate_temperature(int(start_temp.text()))
+    
+    start_temp.setText('25')  # Valid temperature
+    assert validate_temperature(int(start_temp.text()))
+    
+    # Test time format validation
+    cycle_time.setText('1:00')  # Invalid format
+    assert not validate_time_format(cycle_time.text())
+    
+    cycle_time.setText('01:00:00')  # Valid format
+    assert validate_time_format(cycle_time.text())
+    
+    window.close() 
