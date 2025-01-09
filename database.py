@@ -31,13 +31,30 @@ class DatabaseManager:
             
             with cls.get_connection() as conn:
                 cursor = conn.cursor()
-                # Create schedules table with proper schema
+                # Create schedules table
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS schedules
                     (
-                        name TEXT PRIMARY KEY,
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT UNIQUE,
                         created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         modified_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Create schedule_entries table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS schedule_entries
+                    (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        schedule_id INTEGER,
+                        cycle_type TEXT,
+                        start_temp INTEGER,
+                        end_temp INTEGER,
+                        duration TEXT,
+                        notes TEXT,
+                        position INTEGER,
+                        FOREIGN KEY (schedule_id) REFERENCES schedules (id)
                     )
                 """)
                 conn.commit()
@@ -67,60 +84,52 @@ class DatabaseManager:
         try:
             with cls.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT name FROM sqlite_master 
-                    WHERE type='table' AND name != 'sqlite_sequence'
-                    ORDER BY name
-                """)
+                cursor.execute("SELECT name FROM schedules ORDER BY name")
                 return [row[0] for row in cursor.fetchall()]
         except sqlite3.Error as e:
             logger.error(f"Error fetching schedules: {e}")
             return []
 
     @classmethod
-    def save_schedule(cls, name: str, data: List[Tuple]) -> bool:
-        """Save or update a schedule in the database."""
+    def save_schedule(cls, schedule_name, entries):
+        """Save a schedule to the database."""
         try:
-            logger.info(f"Attempting to save schedule: {name}")
-            with cls.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Create table for this schedule
-                cursor.execute(f"""
-                    CREATE TABLE IF NOT EXISTS "{name}" (
-                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        Cycle INTEGER,
-                        CycleType TEXT,
-                        StartTemp INTEGER,
-                        EndTemp INTEGER,
-                        CycleTime TEXT,
-                        Notes TEXT
-                    )
-                """)
-                
-                # Clear existing data
-                cursor.execute(f'DELETE FROM "{name}"')
-                logger.debug(f"Cleared existing data for schedule: {name}")
-                
-                # Insert new data
-                for i, entry in enumerate(data, 1):
-                    cursor.execute(f"""
-                        INSERT INTO "{name}" 
-                        (Cycle, CycleType, StartTemp, EndTemp, CycleTime, Notes)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (i,) + entry)
-                
-                # Update schedules table
+            conn = sqlite3.connect(cls.DB_NAME)
+            cursor = conn.cursor()
+            
+            # Delete existing schedule if it exists
+            cursor.execute("DELETE FROM schedules WHERE name = ?", (schedule_name,))
+            
+            # Insert new schedule
+            cursor.execute("INSERT INTO schedules (name) VALUES (?)", (schedule_name,))
+            schedule_id = cursor.lastrowid
+            
+            # Insert schedule entries
+            for entry in entries:
                 cursor.execute("""
-                    INSERT OR REPLACE INTO schedules (name) VALUES (?)
-                """, (name,))
-                
-                conn.commit()
-                logger.info(f"Schedule '{name}' saved successfully")
-                return True
+                    INSERT INTO schedule_entries 
+                    (schedule_id, cycle_type, start_temp, end_temp, duration, notes, position) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    schedule_id,
+                    entry['CycleType'],
+                    entry['StartTemp'],
+                    entry['EndTemp'],
+                    entry['Duration'],
+                    entry['Notes'],
+                    entries.index(entry)
+                ))
+            
+            conn.commit()
+            return True
+            
         except Exception as e:
-            logger.error(f"Error saving schedule '{name}': {e}")
+            logger.error(f"Error saving schedule '{schedule_name}': {str(e)}")
             return False
+            
+        finally:
+            if conn:
+                conn.close()
 
     @classmethod
     def delete_schedule(cls, name: str) -> bool:

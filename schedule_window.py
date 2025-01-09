@@ -191,89 +191,73 @@ class ScheduleWindow(QDialog):
             logger.debug(f"Time validation error: {str(e)}")
             return False
 
-    def validate_and_collect_entries(self):
+    def validate_and_collect_entries(self, show_warnings=True):
         valid_entries = []
         row_count = self.table.rowCount()
         
-        # Log validation process
-        logger.debug(f"Validating {row_count} rows")
-        
         for row in range(row_count):
-            # Get cycle type
-            cycle_widget = self.table.cellWidget(row, 0)
-            if cycle_widget is None:
-                logger.debug(f"Row {row}: No cycle widget")
-                continue
-            
-            cycle_type = cycle_widget.currentText()
-            if not cycle_type:
-                logger.debug(f"Row {row}: Empty cycle type")
-                continue
-
             try:
-                # Get cell values
-                start_temp = self.table.item(row, 1)
-                end_temp = self.table.item(row, 2)
-                cycle_time = self.table.item(row, 3)
-                notes = self.table.item(row, 4)
-
-                # Check if cells exist and have text
-                if not all([start_temp, end_temp, cycle_time]):
-                    logger.debug(f"Row {row}: Missing required fields")
+                # Get widgets
+                cycle_type_widget = self.table.cellWidget(row, 0)
+                start_temp_widget = self.table.cellWidget(row, 1)
+                end_temp_widget = self.table.cellWidget(row, 2)
+                cycle_time_widget = self.table.cellWidget(row, 3)
+                notes_widget = self.table.cellWidget(row, 4)
+                
+                # Skip if no widgets
+                if not all([cycle_type_widget, start_temp_widget, end_temp_widget, cycle_time_widget]):
                     continue
-
-                start_temp_text = start_temp.text().strip()
-                end_temp_text = end_temp.text().strip()
-                cycle_time_text = cycle_time.text().strip()
-                notes_text = notes.text().strip() if notes else ""
-
+                    
+                # Get values
+                cycle_type = cycle_type_widget.currentText()
+                start_temp_text = start_temp_widget.text().strip()
+                end_temp_text = end_temp_widget.text().strip()
+                cycle_time_text = cycle_time_widget.text().strip()
+                notes_text = notes_widget.text().strip() if notes_widget else ""
+                
                 # Skip empty rows
-                if not all([start_temp_text, end_temp_text, cycle_time_text]):
-                    logger.debug(f"Row {row}: Empty required fields")
+                if not all([cycle_type, start_temp_text, end_temp_text, cycle_time_text]):
                     continue
-
+                    
                 # Validate time format
                 if not validate_time_format(cycle_time_text):
-                    QMessageBox.warning(self, "Error", 
-                        f"Invalid time format in row {row + 1}. Use HH:MM:SS")
+                    if show_warnings:
+                        QMessageBox.warning(self, "Error", f"Invalid time format in row {row + 1}. Use HH:MM:SS")
                     return None
-
+                    
                 # Validate temperatures
                 try:
-                    start_temp_val = int(start_temp_text)
-                    end_temp_val = int(end_temp_text)
+                    start_temp = int(start_temp_text)
+                    end_temp = int(end_temp_text)
                     
-                    if not (validate_temperature(start_temp_val) and 
-                            validate_temperature(end_temp_val)):
-                        QMessageBox.warning(self, "Error", 
-                            f"Invalid temperature in row {row + 1}")
+                    if not (validate_temperature(start_temp) and validate_temperature(end_temp)):
+                        if show_warnings:
+                            QMessageBox.warning(self, "Error", f"Invalid temperature in row {row + 1}")
                         return None
                             
+                    # Add valid entry
+                    valid_entries.append({
+                        'CycleType': cycle_type,
+                        'StartTemp': start_temp,
+                        'EndTemp': end_temp,
+                        'Duration': cycle_time_text,
+                        'Notes': notes_text
+                    })
+                    
                 except ValueError:
-                    QMessageBox.warning(self, "Error", 
-                        f"Invalid temperature format in row {row + 1}")
+                    if show_warnings:
+                        QMessageBox.warning(self, "Error", f"Invalid temperature format in row {row + 1}")
                     return None
-
-                # Add valid entry
-                valid_entries.append((
-                    cycle_type, 
-                    start_temp_val, 
-                    end_temp_val, 
-                    cycle_time_text, 
-                    notes_text
-                ))
-                logger.debug(f"Row {row}: Valid entry added")
-
-            except AttributeError as e:
-                logger.error(f"Row {row}: AttributeError - {str(e)}")
+                    
+            except Exception as e:
+                logger.error(f"Row {row}: Error - {str(e)}")
                 continue
-
+                
         if not valid_entries:
-            QMessageBox.warning(self, "Error", 
-                "No valid entries to save. Please check all required fields.")
+            if show_warnings:
+                QMessageBox.warning(self, "Error", "No valid entries to save. Please check all required fields.")
             return None
-
-        logger.info(f"Collected {len(valid_entries)} valid entries")
+                
         return valid_entries
 
     def save_as_schedule(self):

@@ -5,6 +5,7 @@ test_smartfurnace.py - Progressive test suite
 import pytest
 from pytestqt.qt_compat import qt_api
 from PyQt5.QtCore import QSettings, Qt
+from PyQt5.QtWidgets import QMessageBox
 import sys
 import os
 
@@ -24,6 +25,16 @@ def setup_database():
     DatabaseManager.DB_NAME = original_db
     if os.path.exists(test_db):
         os.remove(test_db)
+
+@pytest.fixture
+def suppress_qt_warnings(monkeypatch):
+    """Suppress QMessageBox warnings during tests."""
+    def mock_warning(*args, **kwargs):
+        pass
+    
+    monkeypatch.setattr(QMessageBox, 'warning', mock_warning)
+    monkeypatch.setattr(QMessageBox, 'critical', mock_warning)
+    monkeypatch.setattr(QMessageBox, 'information', mock_warning)
 
 def test_database_operations(setup_database):
     """Test basic database operations."""
@@ -103,3 +114,115 @@ def test_first_row_auto_population(qtbot):
     assert cycle_time_input.text() == DEFAULT_TIME, "Cycle time should be default for Soak"
     
     window.close() 
+
+def test_validate_and_collect_entries(qtbot, suppress_qt_warnings):
+    """Test validation and collection of schedule entries."""
+    window = ScheduleWindow()
+    qtbot.addWidget(window)
+    
+    def test_valid_entry():
+        # Set up a valid row
+        cycle_type = window.table.cellWidget(0, 0)
+        start_temp = window.table.cellWidget(0, 1)
+        end_temp = window.table.cellWidget(0, 2)
+        cycle_time = window.table.cellWidget(0, 3)
+        notes = window.table.cellWidget(0, 4)
+        
+        cycle_type.setCurrentText('Ramp')
+        start_temp.setText('25')
+        end_temp.setText('100')
+        cycle_time.setText('01:00:00')
+        notes.setText('Test ramp')
+        
+        entries = window.validate_and_collect_entries(show_warnings=False)
+        assert entries is not None
+        assert len(entries) == 1, "Should have one valid entry"
+        expected = {
+            'CycleType': 'Ramp',
+            'StartTemp': 25,
+            'EndTemp': 100,
+            'Duration': '01:00:00',
+            'Notes': 'Test ramp'
+        }
+        assert entries[0] == expected, "Entry data should match expected format"
+    
+    # Test Case 2: Invalid temperature
+    def test_invalid_temperature():
+        start_temp = window.table.cellWidget(0, 1)
+        start_temp.setText('9999')  # Invalid temperature
+        
+        entries = window.validate_and_collect_entries(show_warnings=False)
+        assert entries is None, "Invalid temperature should return None"
+    
+    # Test Case 3: Invalid time format
+    def test_invalid_time():
+        start_temp = window.table.cellWidget(0, 1)
+        cycle_time = window.table.cellWidget(0, 3)
+        
+        start_temp.setText('25')  # Reset to valid temperature
+        cycle_time.setText('1:00')  # Invalid time format
+        
+        entries = window.validate_and_collect_entries(show_warnings=False)
+        assert entries is None, "Invalid time format should return None"
+    
+    # Test Case 4: Empty required fields
+    def test_empty_fields():
+        start_temp = window.table.cellWidget(0, 1)
+        end_temp = window.table.cellWidget(0, 2)
+        cycle_time = window.table.cellWidget(0, 3)
+        
+        start_temp.setText('')
+        end_temp.setText('')
+        cycle_time.setText('')
+        
+        entries = window.validate_and_collect_entries(show_warnings=False)
+        assert entries is None, "Empty required fields should return None"
+    
+    # Run all test cases
+    test_valid_entry()
+    test_invalid_temperature()
+    test_invalid_time()
+    test_empty_fields()
+    
+    window.close() 
+
+def test_schedule_persistence(qtbot, setup_database):
+    """Test that schedules are properly saved and loaded."""
+    window = ScheduleWindow()
+    qtbot.addWidget(window)
+    
+    # Create test schedule
+    cycle_type = window.table.cellWidget(0, 0)
+    start_temp = window.table.cellWidget(0, 1)
+    end_temp = window.table.cellWidget(0, 2)
+    cycle_time = window.table.cellWidget(0, 3)
+    notes = window.table.cellWidget(0, 4)
+    
+    test_data = ('Ramp', '25', '100', '01:00:00', 'Test ramp')
+    cycle_type.setCurrentText(test_data[0])
+    start_temp.setText(test_data[1])
+    end_temp.setText(test_data[2])
+    cycle_time.setText(test_data[3])
+    notes.setText(test_data[4])
+    
+    # Save schedule
+    schedule_name = "Test Schedule"
+    entries = window.validate_and_collect_entries(show_warnings=False)
+    assert DatabaseManager.save_schedule(schedule_name, entries)
+    
+    # Create new window to test loading
+    window.close()
+    new_window = ScheduleWindow()
+    qtbot.addWidget(new_window)
+    
+    # Load and verify data
+    loaded_data = DatabaseManager.load_schedule(schedule_name)
+    assert loaded_data is not None
+    assert len(loaded_data) == 1
+    assert loaded_data[0]['CycleType'] == test_data[0]
+    assert str(loaded_data[0]['StartTemp']) == test_data[1]
+    assert str(loaded_data[0]['EndTemp']) == test_data[2]
+    assert loaded_data[0]['Duration'] == test_data[3]
+    assert loaded_data[0]['Notes'] == test_data[4]
+    
+    new_window.close() 
