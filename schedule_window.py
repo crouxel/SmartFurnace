@@ -1,314 +1,19 @@
-import sys
 import sqlite3
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMenu, QAction, QInputDialog, QMessageBox
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFontDatabase
-from datetime import datetime, timedelta
-import pyqtgraph as pg
-from custom_combobox import CustomComboBox
-from schedule_window import ScheduleWindow
-from styles import get_label_style, get_temp_display_style
-from database import fetch_all_schedules
+from PyQt5.QtWidgets import (QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout, 
+                            QHBoxLayout, QPushButton, QInputDialog, QMessageBox,
+                            QComboBox)
 import re
-
-class MainWindow(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.start_cycle_time = None
-        self.current_schedule = []
-        self.init_ui()
-
-    def init_ui(self):
-        # Load the Orbitron font
-        font_id = QFontDatabase.addApplicationFont("OrbitronFont.ttf")
-        if font_id == -1:
-            print("Failed to load Orbitron font")
-        else:
-            font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
-
-        self.start_button = QPushButton("Start Cycle")
-        self.combo = CustomComboBox()
-        self.label = QLabel()
-        self.label.setStyleSheet(get_label_style())
-        self.plot_widget = pg.PlotWidget()
-
-        # Setup layouts
-        top_layout = self.setup_top_layout()
-        temp_display_layout, self.temp_display = self.setup_temp_display(font_family)
-        main_layout = self.setup_main_layout(top_layout, temp_display_layout)
-
-        self.setLayout(main_layout)
-
-        # Set up a timer to update the graph every second
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_graph)
-        self.timer.start(1000)
-
-        # Initial update to display the current temperature immediately
-        self.update_graph()
-
-    def setup_top_layout(self):
-        top_layout = QHBoxLayout()
-        self.start_button.clicked.connect(self.write_start_cycle_time)
-        self.combo.addItems(fetch_all_schedules() + ["Add Schedule"])
-        self.combo.currentIndexChanged.connect(lambda: self.on_table_select())
-
-        # Create and set the context menu
-        context_menu = self.show_context_menu()
-        self.combo.set_context_menu(context_menu)
-
-        top_layout.addWidget(self.start_button)
-        top_layout.addWidget(self.combo)
-        return top_layout
-
-    def setup_temp_display(self, font_family):
-        temp_display = QLabel("000°C")
-        temp_display.setAlignment(Qt.AlignCenter)
-        temp_display.setFixedWidth(9 * 24)  # Set the width to accommodate 7 characters
-        temp_display.setStyleSheet(get_temp_display_style(font_family))
-
-        # Center the temperature display with padding
-        temp_display_layout = QHBoxLayout()
-        temp_display_layout.addStretch()
-        temp_display_layout.addWidget(temp_display)
-        temp_display_layout.addStretch()
-        return temp_display_layout, temp_display
-
-    def setup_main_layout(self, top_layout, temp_display_layout):
-        main_layout = QVBoxLayout()
-        main_layout.addLayout(top_layout)
-        main_layout.addLayout(temp_display_layout)  # Add the centered temperature display layout
-        main_layout.addWidget(self.label)
-        main_layout.addWidget(self.plot_widget)
-        return main_layout
-
-    def update_schedule_menu(self):
-        current_text = self.combo.currentText()
-        self.combo.clear()
-        schedules = fetch_all_schedules()
-        self.combo.addItems(schedules)
-        self.combo.insertSeparator(len(schedules))
-        self.combo.addItem("Add Schedule")
-        if current_text in schedules:
-            self.combo.setCurrentText(current_text)  # Reselect the previously selected schedule
-        else:
-            self.combo.setCurrentIndex(0)  # Select the first valid schedule
-
-    def write_start_cycle_time(self):
-        self.start_cycle_time = datetime.now()
-        with open('start_cycle_time.txt', 'w') as f:
-            f.write(self.start_cycle_time.isoformat())
-
-    def get_start_cycle_time(self):
-        if self.start_cycle_time is None:
-            try:
-                with open('start_cycle_time.txt', 'r') as f:
-                    self.start_cycle_time = datetime.fromisoformat(f.read().strip())
-            except FileNotFoundError:
-                self.start_cycle_time = datetime.now()
-        return self.start_cycle_time
-
-    def update_graph(self):
-        if self.start_cycle_time is None:
-            self.start_cycle_time = self.get_start_cycle_time()
-
-        elapsed_time = (datetime.now() - self.start_cycle_time).total_seconds() / 60  # in minutes
-        self.plot_widget.clear()
-        self.regenerate_graph()
-        self.plot_widget.addLine(x=elapsed_time, pen=pg.mkPen('r', style=Qt.DashLine), label='Current Time')
-
-        # Update temperature display
-        current_temp = self.get_current_temperature(elapsed_time)  # Pass elapsed time to get current temperature
-        self.temp_display.setText(f"{current_temp:03d}°C")
-
-    def get_current_temperature(self, elapsed_time):
-        for cycle in self.current_schedule:
-            cycle_start = cycle['Cycle']
-            cycle_end = cycle_start + cycle['CycleTime']
-            if cycle_start <= elapsed_time <= cycle_end:
-                # Linear interpolation between start and end temperature
-                start_temp = cycle['StartTemp']
-                end_temp = cycle['EndTemp']
-                temp = start_temp + (end_temp - start_temp) * (elapsed_time - cycle_start) / (cycle_end - cycle_start)
-                return int(temp)
-        return 0  # Default temperature if not found
-
-    def regenerate_graph(self):
-        selected_table = self.combo.currentText()
-        try:
-            schedule, times, temps, min_temp, max_temp = load_schedule(selected_table)
-            if schedule is None:
-                return
-
-            self.current_schedule = schedule
-
-            self.plot_widget.clear()
-            self.plot_widget.plot(times, temps, pen='b', name='Temperature Schedule')
-
-            # Add current time vertical line
-            start_time = self.get_start_cycle_time()
-            current_time = datetime.now()
-            elapsed_time = (current_time - start_time).total_seconds() / 60  # in minutes
-            self.plot_widget.addLine(x=elapsed_time, pen='r', label='Current Time')  # Removed 'style' argument
-
-            self.plot_widget.setXRange(0, times[-1])  # Set X-axis limits from start to end time
-            self.plot_widget.setYRange(min_temp - 10, max_temp + 10)  # Set Y-axis limits based on min and max temperatures
-
-            # Update X-axis with actual time
-            actual_times = [start_time + timedelta(minutes=t) for t in times]
-            actual_time_labels = [t.strftime('%I:%M %p') for t in actual_times]
-            self.plot_widget.getAxis('bottom').setTicks([list(zip(times, actual_time_labels))])
-        except Exception as e:
-            print(f"Error in regenerate_graph: {e}")
-
-    def on_table_select(self):
-        selected_table = self.combo.currentText()
-        if selected_table == "Add Schedule":
-            self.open_add_table_window()
-        else:
-            self.label.setText(f"Selected table: {selected_table}")
-            self.regenerate_graph()
-
-    def show_context_menu(self):
-        menu = QMenu()
-        edit_action = QAction("Edit Schedule", self.combo)
-        delete_action = QAction("Delete Schedule", self.combo)
-
-        # Connect actions to functions
-        edit_action.triggered.connect(lambda: self.open_edit_table_window(self.combo.currentText()))
-        delete_action.triggered.connect(lambda: self.delete_table(self.combo.currentText()))
-
-        # Add actions to the menu
-        menu.addAction(edit_action)
-        menu.addAction(delete_action)
-        return menu
-
-    def open_edit_table_window(self, table_name):
-        # Move the import statement inside the function to avoid circular import
-        from schedule_window import ScheduleWindow
-        # Fetch the schedule data for the selected table
-        schedule_data = fetch_schedule_data(table_name)
-        edit_window = ScheduleWindow(table_name, schedule_data, parent=self)
-        edit_window.exec_()
-        self.update_schedule_menu()
-        self.combo.setCurrentText(table_name)  # Ensure the combo box stays on the same schedule
-
-    def open_add_table_window(self):
-        add_window = ScheduleWindow(parent=self)
-        add_window.exec_()
-        self.update_schedule_menu()
-        self.combo.setCurrentIndex(0)  # Select the first valid schedule
-
-    def delete_table(self, table_name):
-        try:
-            conn = sqlite3.connect('SmartFurnace.db')
-            cursor = conn.cursor()
-            cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-            conn.commit()
-            conn.close()
-            print(f"Table {table_name} deleted successfully.")
-            self.update_schedule_menu()
-        except sqlite3.OperationalError as e:
-            print(f"Error deleting table {table_name}: {e}")
-
-def fetch_schedule_data(table_name):
-    try:
-        conn = sqlite3.connect('SmartFurnace.db')
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT CycleType, StartTemp, EndTemp, CycleTime, Notes FROM {table_name}")
-        schedule_data = cursor.fetchall()
-        conn.close()
-        return schedule_data
-    except sqlite3.OperationalError as e:
-        print(f"Error fetching schedule data: {e}")
-        return []
-
-def load_schedule(selected_table):
-    global current_schedule
-    try:
-        conn = sqlite3.connect('SmartFurnace.db')
-        cursor = conn.cursor()
-        
-        # Get column names
-        cursor.execute(f"PRAGMA table_info({selected_table})")
-        columns = {row[1]: index for index, row in enumerate(cursor.fetchall())}
-        
-        cursor.execute(f"SELECT * FROM {selected_table}")
-        cycles = cursor.fetchall()
-        conn.close()
-
-        times = []
-        temps = []
-        total_time = 0
-        min_temp = float('inf')
-        max_temp = float('-inf')
-        current_schedule = []
-
-        for cycle in cycles:
-            cycle_dict = {
-                'Id': cycle[columns['Id']],
-                'Cycle': cycle[columns['Cycle']],
-                'StartTemp': cycle[columns['StartTemp']],
-                'EndTemp': cycle[columns['EndTemp']],
-                'CycleType': cycle[columns['CycleType']],
-                'CycleTime': cycle[columns['CycleTime']],
-                'Notes': cycle[columns['Notes']]
-            }
-
-            try:
-                # Parse the time string into a datetime object
-                cycle_time = datetime.strptime(cycle_dict['CycleTime'], "%H:%M:%S")
-                
-                # Calculate total minutes
-                cycle_time_minutes = cycle_time.hour * 60 + cycle_time.minute + cycle_time.second / 60
-                
-                # Update min and max temperatures
-                min_temp = min(min_temp, cycle_dict['StartTemp'], cycle_dict['EndTemp'])
-                max_temp = max(max_temp, cycle_dict['StartTemp'], cycle_dict['EndTemp'])
-                
-                # Append to current_schedule
-                cycle_dict['CycleTime'] = cycle_time_minutes
-                current_schedule.append(cycle_dict)
-                
-                # Append to times and temps for plotting
-                if cycle_dict['CycleType'].lower() == 'ramp':
-                    times.extend([total_time, total_time + cycle_time_minutes])
-                    temps.extend([cycle_dict['StartTemp'], cycle_dict['EndTemp']])
-                elif cycle_dict['CycleType'].lower() == 'soak':
-                    times.extend([total_time, total_time + cycle_time_minutes])
-                    temps.extend([cycle_dict['StartTemp'], cycle_dict['StartTemp']])
-                
-                # Update total_time
-                total_time += cycle_time_minutes
-                
-            except ValueError:
-                print(f"Invalid cycle time format: {cycle_dict['CycleTime']}")
-                continue
-
-        return current_schedule, times, temps, min_temp, max_temp
-
-    except sqlite3.Error as e:
-        print(f"An error occurred: {e}")
-        return None, None, None, None, None
-
-# Initialize the QApplication instance
-app = QApplication(sys.argv)
-
-# Create and show the main window
-window = MainWindow()
-window.show()
-
-sys.exit(app.exec_())
 
 class ScheduleWindow(QDialog):
     def __init__(self, table_name=None, schedule_data=None, parent=None):
         super().__init__(parent)
         self.table_name = table_name
         self.schedule_data = schedule_data
+        self.is_new_schedule = table_name is None
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowTitle("Schedule Editor")
+        self.setWindowTitle("Schedule Editor" if self.is_new_schedule else f"Edit Schedule: {self.table_name}")
         self.setGeometry(100, 100, 600, 400)
 
         layout = QVBoxLayout()
@@ -320,66 +25,173 @@ class ScheduleWindow(QDialog):
         if self.schedule_data:
             self.table.setRowCount(len(self.schedule_data))
             for row, data in enumerate(self.schedule_data):
-                for col, value in enumerate(data):
-                    item = QTableWidgetItem(str(value))
-                    self.table.setItem(row, col, item)
+                self.setup_row(row, data)
+        else:
+            self.table.setRowCount(1)
+            self.setup_row(0)
 
+        add_row_button = QPushButton("Add Row")
+        add_row_button.clicked.connect(self.add_row)
+        layout.addWidget(add_row_button)
         layout.addWidget(self.table)
 
+        # Different button layouts for new vs edit
         button_layout = QHBoxLayout()
-        self.save_button = QPushButton("Save")
-        self.save_button.clicked.connect(self.save_schedule)
-        self.save_as_button = QPushButton("Save as")
-        self.save_as_button.clicked.connect(self.save_as_schedule)
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self.reject)
+        if self.is_new_schedule:
+            save_button = QPushButton("Save")
+            save_button.clicked.connect(self.save_as_schedule)
+            button_layout.addWidget(save_button)
+        else:
+            update_button = QPushButton("Update")
+            update_button.clicked.connect(self.update_schedule)
+            save_as_button = QPushButton("Save As")
+            save_as_button.clicked.connect(self.save_as_schedule)
+            button_layout.addWidget(update_button)
+            button_layout.addWidget(save_as_button)
 
-        button_layout.addWidget(self.save_button)
-        button_layout.addWidget(self.save_as_button)
-        button_layout.addWidget(self.cancel_button)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
 
         layout.addLayout(button_layout)
         self.setLayout(layout)
 
-    def save_schedule(self):
-        # Implement save logic here
-        pass
+    def setup_row(self, row, data=None):
+        # Create and set up the combo box for cycle type
+        cycle_type_combo = QComboBox()
+        cycle_type_combo.addItem("")  # Add empty item first
+        cycle_type_combo.addItems(["Ramp", "Soak"])
+        
+        # Connect the combo box change event to add_row
+        cycle_type_combo.currentTextChanged.connect(lambda: self.on_cycle_type_changed(row))
+        
+        self.table.setCellWidget(row, 0, cycle_type_combo)
+
+        if data:
+            cycle_type_combo.setCurrentText(str(data[0]))
+            for col in range(1, 5):
+                item = QTableWidgetItem(str(data[col]))
+                self.table.setItem(row, col, item)
+        else:
+            for col in range(1, 5):
+                self.table.setItem(row, col, QTableWidgetItem(""))
+
+    def add_row(self):
+        current_row = self.table.rowCount()
+        self.table.setRowCount(current_row + 1)
+        self.setup_row(current_row)
+
+    def on_cycle_type_changed(self, row):
+        cycle_widget = self.table.cellWidget(row, 0)
+        selected_type = cycle_widget.currentText()
+        
+        if selected_type in ["Ramp", "Soak"]:
+            # Set default cycle time
+            self.table.setItem(row, 3, QTableWidgetItem("00:00:00"))
+            
+            # If not the first row, copy previous end temp to start temp
+            if row > 0:
+                prev_end_temp = self.table.item(row - 1, 2)
+                if prev_end_temp and prev_end_temp.text():
+                    self.table.setItem(row, 1, QTableWidgetItem(prev_end_temp.text()))
+                    
+                    # If it's a Soak, set end temp equal to start temp
+                    if selected_type == "Soak":
+                        self.table.setItem(row, 2, QTableWidgetItem(prev_end_temp.text()))
+            
+            # Add new row if this is the last row
+            if row == self.table.rowCount() - 1:
+                self.add_row()
+
+    def update_schedule(self):
+        try:
+            entries = self.validate_and_collect_entries()
+            if entries:
+                conn = sqlite3.connect('SmartFurnace.db')
+                cursor = conn.cursor()
+                
+                # Clear existing entries
+                cursor.execute(f"DELETE FROM {self.table_name}")
+                
+                # Insert new entries with Cycle number
+                for i, entry in enumerate(entries, 1):  # Start counting from 1
+                    cursor.execute(f"""
+                        INSERT INTO {self.table_name} 
+                        (Cycle, CycleType, StartTemp, EndTemp, CycleTime, Notes)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (i,) + entry)  # Add cycle number to the entry
+                
+                conn.commit()
+                conn.close()
+                
+                if hasattr(self.parent(), 'update_schedule_menu'):
+                    self.parent().update_schedule_menu()
+                
+                self.accept()
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Failed to update schedule: {str(e)}")
+            print(f"SQL Error details: {str(e)}")
+            print(f"Entries being inserted: {entries}")
+
+    def validate_and_collect_entries(self):
+        time_pattern = re.compile(r'^\d{2}:\d{2}:\d{2}$')
+        valid_entries = []
+        
+        for row in range(self.table.rowCount()):
+            cycle_widget = self.table.cellWidget(row, 0)
+            if cycle_widget is None or cycle_widget.currentText() == "":
+                continue
+                
+            cycle_type = cycle_widget.currentText()
+            start_temp = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+            end_temp = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
+            cycle_time = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
+            notes = self.table.item(row, 4).text() if self.table.item(row, 4) else ""
+
+            # Skip empty or incomplete rows
+            if not cycle_type or not start_temp or not end_temp or not cycle_time:
+                continue
+
+            if not time_pattern.match(cycle_time):
+                QMessageBox.critical(self, "Error", 
+                                   f"Invalid time format in row {row + 1}. Use HH:MM:SS format.")
+                return None
+
+            try:
+                start_temp = int(start_temp)
+                end_temp = int(end_temp)
+            except ValueError:
+                QMessageBox.critical(self, "Error", 
+                                   f"Temperature values in row {row + 1} must be integers.")
+                return None
+
+            valid_entries.append((cycle_type, start_temp, end_temp, cycle_time, notes))
+
+        if not valid_entries:
+            QMessageBox.critical(self, "Error", "No valid entries to save.")
+            return None
+
+        return valid_entries
 
     def save_as_schedule(self):
         new_schedule_name, ok = QInputDialog.getText(self, "Save As", "Enter new schedule name:")
         if not ok or not new_schedule_name:
             return
 
-        # Validate cycle time format
-        time_pattern = re.compile(r'^\d{2}:\d{2}:\d{2}$')
-        valid_entries = []
-        for row in range(self.table.rowCount() - 1):
-            cycle_type = self.table.cellWidget(row, 0).currentText()
-            start_temp = self.table.item(row, 1).text()
-            end_temp = self.table.item(row, 2).text()
-            cycle_time = self.table.item(row, 3).text()
-            notes = self.table.item(row, 4).text()
+        if not re.match("^[A-Za-z0-9_]+$", new_schedule_name):
+            QMessageBox.critical(self, "Error", 
+                               "Schedule name can only contain letters, numbers, and underscores.")
+            return
 
-            # Skip empty rows
-            if not cycle_type and not start_temp and not end_temp and not cycle_time and not notes:
-                continue
-
-            if not time_pattern.match(cycle_time) or cycle_time == "00:00:00":
-                QMessageBox.critical(self, "Error", f"Invalid time format for cycle {row + 1}. Please use HH:MM:SS format and ensure time is not 00:00:00.")
-                return
-
-            valid_entries.append([row + 1, cycle_type, start_temp, end_temp, cycle_time, notes])
-
-        # Save the schedule to the database with the new name
-        save_schedule(new_schedule_name, valid_entries)
-
-        # Update the dropdown menu if the method exists
-        if hasattr(self.parent(), 'update_schedule_menu'):
-            self.parent().update_schedule_menu()
-        else:
-            print("Warning: Parent widget does not have update_schedule_menu method")
-
-        self.accept()  # Close the ScheduleWindow
+        entries = self.validate_and_collect_entries()
+        if entries:
+            try:
+                save_schedule(new_schedule_name, entries)
+                if hasattr(self.parent(), 'update_schedule_menu'):
+                    self.parent().update_schedule_menu()
+                self.accept()
+            except sqlite3.Error as e:
+                QMessageBox.critical(self, "Error", f"Failed to save schedule: {str(e)}")
 
 def save_schedule(schedule_name, entries):
     try:
@@ -390,22 +202,26 @@ def save_schedule(schedule_name, entries):
         cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {schedule_name} (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                CycleType TEXT,
-                StartTemp INTEGER,
-                EndTemp INTEGER,
-                CycleTime TEXT,
+                Cycle INTEGER NOT NULL,
+                CycleType TEXT NOT NULL,
+                StartTemp INTEGER NOT NULL,
+                EndTemp INTEGER NOT NULL,
+                CycleTime TEXT NOT NULL,
                 Notes TEXT
             )
         """)
 
-        # Insert entries into the new schedule table
-        cursor.executemany(f"""
-            INSERT INTO {schedule_name} (CycleType, StartTemp, EndTemp, CycleTime, Notes)
-            VALUES (?, ?, ?, ?, ?)
-        """, entries)
+        # Insert entries with Cycle number
+        for i, entry in enumerate(entries, 1):  # Start counting from 1
+            cursor.execute(f"""
+                INSERT INTO {schedule_name} 
+                (Cycle, CycleType, StartTemp, EndTemp, CycleTime, Notes)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (i,) + entry)
 
         conn.commit()
         conn.close()
         print(f"Schedule {schedule_name} saved successfully.")
     except sqlite3.Error as e:
         print(f"An error occurred while saving the schedule: {e}")
+        raise e

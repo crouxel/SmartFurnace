@@ -1,20 +1,26 @@
 import sys
 import sqlite3
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMenu, QAction
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFontDatabase
+from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
+                            QPushButton, QLabel, QMenu, QAction, QSizePolicy)
+from PyQt5.QtGui import QIcon, QFontDatabase
+from PyQt5.QtCore import Qt, QTimer, QSize
 from datetime import datetime, timedelta
 import pyqtgraph as pg
 from custom_combobox import CustomComboBox
-from styles import get_label_style, get_temp_display_style
+from styles import (get_label_style, get_temp_display_style, get_button_style, 
+                   get_combo_style, get_time_label_style, get_plot_theme, 
+                   ThemeManager, get_theme_dependent_styles)
 from database import fetch_all_schedules
+from options_dialog import OptionsDialog
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
+        ThemeManager.initialize()  # Initialize theme from saved settings
         self.start_cycle_time = None
         self.current_schedule = []
         self.init_ui()
+        self.apply_theme()  # Make sure we call this
 
     def init_ui(self):
         # Load the Orbitron font
@@ -47,38 +53,149 @@ class MainWindow(QWidget):
 
     def setup_top_layout(self):
         top_layout = QHBoxLayout()
+        
+        # Create start button with fixed width
+        self.start_button = QPushButton("Start Cycle")
+        self.start_button.setFixedWidth(100)  # Set fixed width
+        self.start_button.setStyleSheet(get_button_style(embossed=True))
         self.start_button.clicked.connect(self.write_start_cycle_time)
-        self.combo.addItems(fetch_all_schedules() + ["Add Schedule"])
-        self.combo.currentIndexChanged.connect(lambda: self.on_table_select())
-
-        # Create and set the context menu
-        context_menu = self.show_context_menu()
-        self.combo.set_context_menu(context_menu)
-
+        
+        # Add start button to the left
         top_layout.addWidget(self.start_button)
+        
+        # Add stretch to push everything else to the right
+        top_layout.addStretch()
+        
+        # Add Profile label
+        profile_label = QLabel("Profile:")
+        theme = ThemeManager.get_current_theme()
+        profile_label.setStyleSheet(f"color: {theme['primary']}; font-weight: bold;")
+        top_layout.addWidget(profile_label)
+        
+        # Add some spacing between label and combo
+        top_layout.addSpacing(10)
+        
+        # Create combo box with smaller fixed width
+        self.combo = CustomComboBox(self)
+        self.combo.setFixedWidth(150)  # Reduced width
+        self.combo.setStyleSheet(get_combo_style(embossed=True))
+        self.combo.addItems(fetch_all_schedules() + ["Add Schedule"])
+        self.combo.currentIndexChanged.connect(self.on_table_select)
+        
+        # Create and set the context menu
+        menu = QMenu(self)
+        edit_action = QAction("Edit Schedule", self)
+        delete_action = QAction("Delete Schedule", self)
+        
+        edit_action.triggered.connect(lambda: self.open_edit_table_window(self.combo.currentText()))
+        delete_action.triggered.connect(lambda: self.delete_table(self.combo.currentText()))
+        
+        menu.addAction(edit_action)
+        menu.addAction(delete_action)
+        
+        self.combo.set_context_menu(menu)
+        
+        # Add combo box
         top_layout.addWidget(self.combo)
+        
         return top_layout
 
     def setup_temp_display(self, font_family):
-        temp_display = QLabel("000°C")
+        temp_display = QLabel("---°C")
         temp_display.setAlignment(Qt.AlignCenter)
-        temp_display.setFixedWidth(9 * 24)  # Set the width to accommodate 7 characters
-        temp_display.setStyleSheet(get_temp_display_style(font_family))
-
-        # Center the temperature display with padding
+        temp_display.setFixedWidth(250)  # Increased width
+        temp_display.setStyleSheet(get_temp_display_style(font_family=font_family))
+        
         temp_display_layout = QHBoxLayout()
-        temp_display_layout.addStretch()
+        temp_display_layout.addStretch()  # Add stretch before
         temp_display_layout.addWidget(temp_display)
-        temp_display_layout.addStretch()
+        temp_display_layout.addStretch()  # Add stretch after
+        
         return temp_display_layout, temp_display
 
     def setup_main_layout(self, top_layout, temp_display_layout):
         main_layout = QVBoxLayout()
+        
+        # Add time information layout
+        time_info_layout = QHBoxLayout()
+        self.start_time_label = QLabel("Start: --:--:--")
+        self.end_time_label = QLabel("End: --:--:--")
+        
+        # Apply time label styles
+        self.start_time_label.setStyleSheet(get_time_label_style())
+        self.end_time_label.setStyleSheet(get_time_label_style())
+        
+        time_info_layout.addWidget(self.start_time_label)
+        time_info_layout.addStretch()
+        time_info_layout.addWidget(self.end_time_label)
+        
+        # Setup plot widget
+        plot_widget = self.setup_plot_widget()
+        
         main_layout.addLayout(top_layout)
-        main_layout.addLayout(temp_display_layout)  # Add the centered temperature display layout
+        main_layout.addLayout(temp_display_layout)
+        main_layout.addLayout(time_info_layout)
         main_layout.addWidget(self.label)
-        main_layout.addWidget(self.plot_widget)
+        main_layout.addWidget(plot_widget)
+        
+        # Add options button with SVG icon
+        options_layout = QHBoxLayout()
+        options_layout.addStretch()
+        
+        options_button = QPushButton()
+        icon = QIcon("gear-icon.svg")  # Make sure this matches your file name exactly
+        options_button.setIcon(icon)
+        options_button.setIconSize(QSize(24, 24))  # Set icon size
+        options_button.setFixedSize(32, 32)
+        options_button.setToolTip("Options")  # Add tooltip
+        options_button.clicked.connect(self.show_options)
+        options_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+        
+        options_layout.addWidget(options_button)
+        main_layout.addLayout(options_layout)
+        
         return main_layout
+
+    def setup_plot_widget(self):
+        # Configure plot appearance
+        theme = get_plot_theme()
+        self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setBackground(theme['background'])
+        
+        # Style the plot
+        plot_item = self.plot_widget.getPlotItem()
+        
+        # Configure axes with proper grid
+        for axis in ['bottom', 'left']:
+            axis_item = plot_item.getAxis(axis)
+            axis_item.setPen(pg.mkPen(color=theme['axis'], width=1))
+            axis_item.setTextPen(theme['text'])
+            # Convert hex grid color to RGB tuple for proper grid handling
+            grid_color = pg.mkColor(theme['grid'])
+            axis_item.setGrid(50)  # Alpha value for grid
+            
+        # Show grids with proper styling
+        plot_item.showGrid(x=True, y=True, alpha=0.5)
+        
+        # Set labels with proper styling
+        plot_item.setLabel('left', text='Temperature', units='°C', 
+                          color=theme['text'], font={'size': '12pt'})
+        plot_item.setLabel('bottom', text='Time', 
+                          color=theme['text'], font={'size': '12pt'})
+        
+        # Style the legend if needed
+        plot_item.addLegend(offset=(-10, 10))
+        
+        return self.plot_widget
 
     def update_schedule_menu(self):
         current_text = self.combo.currentText()
@@ -110,16 +227,39 @@ class MainWindow(QWidget):
         if self.start_cycle_time is None:
             self.start_cycle_time = self.get_start_cycle_time()
 
-        elapsed_time = (datetime.now() - self.start_cycle_time).total_seconds() / 60  # in minutes
+        elapsed_time = (datetime.now() - self.start_cycle_time).total_seconds() / 60
         self.plot_widget.clear()
+        
+        theme = get_plot_theme()
         self.regenerate_graph()
-        self.plot_widget.addLine(x=elapsed_time, pen=pg.mkPen('r', style=Qt.DashLine), label='Current Time')
+        
+        # Add current time line with updated style
+        self.plot_widget.addLine(
+            x=elapsed_time, 
+            pen=pg.mkPen(theme['current_time'], width=2, style=Qt.DashLine)
+        )
 
         # Update temperature display
-        current_temp = self.get_current_temperature(elapsed_time)  # Pass elapsed time to get current temperature
+        current_temp = self.get_current_temperature(elapsed_time)
         self.temp_display.setText(f"{current_temp:03d}°C")
 
+        # Update time labels with AM/PM
+        if self.current_schedule:
+            start_time = self.get_start_cycle_time()
+            total_duration = sum(cycle['CycleTime'] for cycle in self.current_schedule)
+            end_time = start_time + timedelta(minutes=total_duration)
+            
+            self.start_time_label.setText(f"Start: {start_time.strftime('%I:%M:%S %p')}")
+            self.end_time_label.setText(f"End: {end_time.strftime('%I:%M:%S %p')}")
+
     def get_current_temperature(self, elapsed_time):
+        if not self.current_schedule:
+            return 0  # Return 0 if no schedule is loaded
+        
+        # Get the first cycle's start temperature for times before the first cycle
+        if elapsed_time < self.current_schedule[0]['Cycle']:
+            return self.current_schedule[0]['StartTemp']
+        
         for cycle in self.current_schedule:
             cycle_start = cycle['Cycle']
             cycle_end = cycle_start + cycle['CycleTime']
@@ -129,6 +269,11 @@ class MainWindow(QWidget):
                 end_temp = cycle['EndTemp']
                 temp = start_temp + (end_temp - start_temp) * (elapsed_time - cycle_start) / (cycle_end - cycle_start)
                 return int(temp)
+        
+        # If we're past the last cycle, return the last cycle's end temperature
+        if self.current_schedule and elapsed_time > cycle_end:
+            return self.current_schedule[-1]['EndTemp']
+        
         return 0  # Default temperature if not found
 
     def regenerate_graph(self):
@@ -139,23 +284,42 @@ class MainWindow(QWidget):
                 return
 
             self.current_schedule = schedule
+            theme = get_plot_theme()
 
-            self.plot_widget.clear()
-            self.plot_widget.plot(times, temps, pen='b', name='Temperature Schedule')
+            # Plot temperature curve with enhanced styling
+            self.plot_widget.plot(
+                times, 
+                temps, 
+                pen=pg.mkPen(
+                    color=theme['curve'],
+                    width=3,
+                    style=Qt.SolidLine
+                ),
+                symbol='o',  # Add points at each vertex
+                symbolSize=8,
+                symbolBrush=theme['curve'],
+                symbolPen=None,  # No border on points
+                name='Temperature Schedule'
+            )
 
-            # Add current time vertical line
-            start_time = self.get_start_cycle_time()
-            current_time = datetime.now()
-            elapsed_time = (current_time - start_time).total_seconds() / 60  # in minutes
-            self.plot_widget.addLine(x=elapsed_time, pen='r', label='Current Time')  # Removed 'style' argument
+            # Set axis ranges with padding
+            y_padding = (max_temp - min_temp) * 0.1  # 10% padding
+            self.plot_widget.setXRange(0, times[-1])
+            self.plot_widget.setYRange(min_temp - y_padding, max_temp + y_padding)
 
-            self.plot_widget.setXRange(0, times[-1])  # Set X-axis limits from start to end time
-            self.plot_widget.setYRange(min_temp - 10, max_temp + 10)  # Set Y-axis limits based on min and max temperatures
+            # Update X-axis with HH:MM format
+            if times and self.start_cycle_time:
+                start_time = self.start_cycle_time
+                x_ticks = []
+                for t in times:
+                    tick_time = start_time + timedelta(minutes=t)
+                    x_ticks.append((t, tick_time.strftime('%H:%M')))
+                
+                self.plot_widget.getAxis('bottom').setTicks([x_ticks])
 
-            # Update X-axis with actual time
-            actual_times = [start_time + timedelta(minutes=t) for t in times]
-            actual_time_labels = [t.strftime('%I:%M %p') for t in actual_times]
-            self.plot_widget.getAxis('bottom').setTicks([list(zip(times, actual_time_labels))])
+            # Ensure grid is visible
+            self.plot_widget.getPlotItem().showGrid(x=True, y=True, alpha=0.5)
+
         except Exception as e:
             print(f"Error in regenerate_graph: {e}")
 
@@ -168,17 +332,20 @@ class MainWindow(QWidget):
             self.regenerate_graph()
 
     def show_context_menu(self):
-        menu = QMenu()
-        edit_action = QAction("Edit Schedule", self.combo)
-        delete_action = QAction("Delete Schedule", self.combo)
-
-        # Connect actions to functions
+        print("Creating context menu")
+        menu = QMenu(self.combo)  # Set combo as parent
+        menu.setStyleSheet(get_combo_style())
+        
+        edit_action = QAction("Edit Schedule", menu)
+        delete_action = QAction("Delete Schedule", menu)
+        
         edit_action.triggered.connect(lambda: self.open_edit_table_window(self.combo.currentText()))
         delete_action.triggered.connect(lambda: self.delete_table(self.combo.currentText()))
-
-        # Add actions to the menu
+        
         menu.addAction(edit_action)
         menu.addAction(delete_action)
+        
+        print("Menu created with actions")
         return menu
 
     def open_edit_table_window(self, table_name):
@@ -208,6 +375,28 @@ class MainWindow(QWidget):
             self.update_schedule_menu()
         except sqlite3.OperationalError as e:
             print(f"Error deleting table {table_name}: {e}")
+
+    def show_options(self):
+        dialog = OptionsDialog(self)
+        dialog.exec_()
+
+    def apply_theme(self):
+        theme = ThemeManager.get_current_theme()
+        # Set main window background
+        self.setStyleSheet(f"background-color: {theme['background']};")
+        
+        # Update all themed components
+        styles = get_theme_dependent_styles()
+        
+        # Apply styles to components
+        self.start_button.setStyleSheet(styles['button'])
+        self.combo.setStyleSheet(styles['combo'])
+        self.temp_display.setStyleSheet(styles['temp_display'])
+        
+        # Update plot theme
+        self.plot_widget.setBackground(theme['background'])
+        self.plot_widget.getAxis('bottom').setPen(theme['grid'])
+        self.plot_widget.getAxis('left').setPen(theme['grid'])
 
 def fetch_schedule_data(table_name):
     try:
