@@ -34,7 +34,6 @@ class schedule_window(QDialog):
         # Initialize class attributes
         self.test_mode = False
         self.existing_schedule = existing_schedule
-        self.schedule_name = existing_schedule
         self.schedule_data = None
         
         # Set window title based on mode
@@ -55,7 +54,7 @@ class schedule_window(QDialog):
             self.load_schedule(existing_schedule)
         else:
             logger.debug("Adding empty row for new schedule")
-            self.add_empty_row()
+            self.add_row(-1)  # Add first row at position -1 (will become row 0)
 
     def setup_buttons(self):
         """Create button layout based on whether we're editing or adding"""
@@ -111,100 +110,137 @@ class schedule_window(QDialog):
         self.setLayout(layout)
 
     def setup_table(self):
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["Type", "Start °C", "End °C", "Time", "Notes", ""])
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        self.table.setColumnWidth(5, 30)
-        self.table.setStyleSheet(get_table_style())  # Add table styling
+        """Set up the table widget."""
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)  # Add, Type, Start, End, Time, Notes, Delete
+        self.table.setHorizontalHeaderLabels(["Add", "Type", "Start Temp", "End Temp", "Time", "Notes", "Delete"])
+        
+        # Set column widths
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)  # Add button
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)  # Delete button
+        self.table.setColumnWidth(0, 30)  # Add button width
+        self.table.setColumnWidth(6, 30)  # Delete button width
+        
+        # Add initial row only for new schedules
+        if not self.existing_schedule:
+            self.add_row(0)  # Add first row at index 0
 
-        if self.schedule_data:
-            self.table.setRowCount(len(self.schedule_data))
-            for row, data in enumerate(self.schedule_data):
-                self.setup_row(row, data)
-        else:
-            self.table.setRowCount(1)
-            self.setup_row(0)
-
-    def setup_row(self, row, data=None):
-        """Set up a row in the schedule table."""
-        # Create and set up the combo box for cycle type
-        cycle_type_combo = QComboBox()
-        cycle_type_combo.addItem("")  # Empty item first
-        cycle_type_combo.addItems(["Ramp", "Soak"])
-        cycle_type_combo.setStyleSheet(get_combo_style())
-        self.table.setCellWidget(row, 0, cycle_type_combo)
-
-        # Create line edits for temperature and time
-        start_temp_edit = QLineEdit()
-        end_temp_edit = QLineEdit()
-        cycle_time_edit = QLineEdit()
-        notes_edit = QLineEdit()
-
-        # Set up widgets in cells
-        self.table.setCellWidget(row, 1, start_temp_edit)
-        self.table.setCellWidget(row, 2, end_temp_edit)
-        self.table.setCellWidget(row, 3, cycle_time_edit)
-        self.table.setCellWidget(row, 4, notes_edit)
-
-        if data:
-            cycle_type_combo.setCurrentText(str(data[0]))
-            start_temp_edit.setText(str(data[1]))
-            end_temp_edit.setText(str(data[2]))
-            cycle_time_edit.setText(str(data[3]))
-            notes_edit.setText(str(data[4]))
-
-        # Connect cycle type changes to auto-population
-        cycle_type_combo.currentTextChanged.connect(
-            lambda text: self.auto_populate_first_row(text) if row == 0 else None
-        )
-
-    def add_row(self):
-        """Add a new row to the table."""
-        current_row = self.table.rowCount()
-        self.table.insertRow(current_row)
+    def add_row(self, position):
+        """Add a row after the specified position."""
+        logger.debug(f"Adding row after position {position}")
+        self.table.insertRow(position + 1)
+        current_row = position + 1
         
         # Create widgets for the new row
+        add_btn = QPushButton("+")
+        add_btn.clicked.connect(lambda: self.add_row(current_row))
+        
         cycle_type = QComboBox()
-        cycle_type.addItems(["Ramp", "Soak"])
-        cycle_type.currentTextChanged.connect(lambda text: self.auto_populate_first_row(text))
+        cycle_type.addItems(["", "Ramp", "Soak"])
+        cycle_type.setStyleSheet(get_combo_style())
+        cycle_type.currentTextChanged.connect(lambda: self.on_cycle_type_changed(current_row))
         
         start_temp = QLineEdit()
         end_temp = QLineEdit()
         cycle_time = QLineEdit()
         notes = QLineEdit()
         
-        # Set validators
-        start_temp.setValidator(QIntValidator(MIN_TEMP, MAX_TEMP))
-        end_temp.setValidator(QIntValidator(MIN_TEMP, MAX_TEMP))
+        # Set default time
+        cycle_time.setText("00:00:00")
+        
+        # If there's a previous row, set start temp to previous end temp
+        if current_row > 0:
+            prev_end_temp = self.table.cellWidget(current_row - 1, 3)  # End temp column
+            if prev_end_temp and prev_end_temp.text():
+                start_temp.setText(prev_end_temp.text())
+        
+        # Create delete button
+        delete_btn = QPushButton("-")
+        delete_btn.clicked.connect(lambda: self.delete_row(current_row))
         
         # Add widgets to the row
-        self.table.setCellWidget(current_row, 0, cycle_type)
-        self.table.setCellWidget(current_row, 1, start_temp)
-        self.table.setCellWidget(current_row, 2, end_temp)
-        self.table.setCellWidget(current_row, 3, cycle_time)
-        self.table.setCellWidget(current_row, 4, notes)
+        self.table.setCellWidget(current_row, 0, add_btn)      # Add button first
+        self.table.setCellWidget(current_row, 1, cycle_type)   # Then cycle type
+        self.table.setCellWidget(current_row, 2, start_temp)   # Start temp
+        self.table.setCellWidget(current_row, 3, end_temp)     # End temp
+        self.table.setCellWidget(current_row, 4, cycle_time)   # Time
+        self.table.setCellWidget(current_row, 5, notes)        # Notes
+        self.table.setCellWidget(current_row, 6, delete_btn)   # Delete button last
         
-        # Connect the add row button
-        if current_row == self.table.rowCount() - 1:  # If this is the last row
-            add_row_button = QPushButton("+")
-            add_row_button.clicked.connect(self.add_row)
-            self.table.setCellWidget(current_row, 5, add_row_button)
+        # Update subsequent rows' start temperatures
+        self.update_start_temperatures(current_row + 1)
         
-        return current_row
+        logger.debug(f"Row added at index {current_row}")
+
+    def delete_row(self, row):
+        """Delete a row from the table."""
+        if self.table.rowCount() > 1:  # Prevent deleting the last row
+            self.table.removeRow(row)
+            # Update start temperatures for remaining rows
+            self.update_start_temperatures(row)
+        else:
+            QMessageBox.warning(self, "Warning", "Cannot delete the last row")
+
+    def update_start_temperatures(self, start_row=0):
+        """Update start temperatures based on previous row's end temperature."""
+        for row in range(start_row, self.table.rowCount()):
+            if row > 0:
+                prev_end_temp = self.table.cellWidget(row - 1, 3)  # End temp column
+                current_start_temp = self.table.cellWidget(row, 2)  # Start temp column
+                if prev_end_temp and prev_end_temp.text() and current_start_temp:
+                    current_start_temp.setText(prev_end_temp.text())
+
+    def load_data(self):
+        """Load existing schedule data into the table."""
+        try:
+            data = DatabaseManager.load_schedule(self.existing_schedule)
+            if data:
+                # Clear existing rows
+                self.table.setRowCount(0)
+                
+                # Add rows for each entry
+                last_row = -1  # Start with -1 so first add_row will be at position 0
+                for entry in data:
+                    self.add_row(last_row)  # This will handle start temp propagation
+                    current_row = last_row + 1
+                    last_row = current_row
+                    
+                    # Set the values
+                    self.table.cellWidget(current_row, 1).setCurrentText(entry['CycleType'])
+                    self.table.cellWidget(current_row, 2).setText(str(entry['StartTemp']))
+                    self.table.cellWidget(current_row, 3).setText(str(entry['EndTemp']))
+                    self.table.cellWidget(current_row, 4).setText(entry['CycleTime'])
+                    self.table.cellWidget(current_row, 5).setText(entry.get('Notes', ''))
+                
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error loading data: {e}", exc_info=True)
+            raise
 
     def on_cycle_type_changed(self, row):
+        """Handle cycle type changes."""
         try:
-            cycle_type = self.table.cellWidget(row, 0).currentText()
+            cycle_type = self.table.cellWidget(row, 1).currentText()  # Column 1 is cycle type
             logger.debug(f"Cycle type changed in row {row} to: {cycle_type}")
             
-            if cycle_type in ["Ramp", "Soak"]:
-                # Initialize time to 00:00:00
-                time_item = QTableWidgetItem("00:00:00")
-                self.table.setItem(row, 3, time_item)
+            if cycle_type == "Soak":
+                # Get start temp value
+                start_temp_widget = self.table.cellWidget(row, 2)  # Column 2 is start temp
+                if start_temp_widget and start_temp_widget.text():
+                    # Set end temp to match start temp
+                    end_temp_widget = self.table.cellWidget(row, 3)  # Column 3 is end temp
+                    end_temp_widget.setText(start_temp_widget.text())
+                    logger.debug(f"Set end temp to match start temp: {start_temp_widget.text()}")
+            
+            # Set default time if needed
+            cycle_time = self.table.cellWidget(row, 4)  # Column 4 is time
+            if cycle_type in ["Ramp", "Soak"] and (not cycle_time.text() or cycle_time.text() == ""):
+                cycle_time.setText("00:00:00")
                 logger.debug(f"Set initial time for row {row}")
+            
         except Exception as e:
-            logger.error(f"Error in on_cycle_type_changed: {e}")
+            logger.error(f"Error in on_cycle_type_changed: {e}", exc_info=True)
 
     def update_schedule(self):
         """Update the existing schedule."""
@@ -217,7 +253,7 @@ class schedule_window(QDialog):
                         entry['CycleType'],
                         entry['StartTemp'],
                         entry['EndTemp'],
-                        entry['Duration'],
+                        entry['CycleTime'],
                         entry.get('Notes', '')
                     ) for entry in entries
                 ]
@@ -272,86 +308,65 @@ class schedule_window(QDialog):
             return False
 
     def validate_and_collect_entries(self, show_warnings: bool = True) -> Optional[List[Dict]]:
-        """Validate and collect all entries from the table.
-        
-        Returns:
-            List of dictionaries with keys:
-            - CycleType: str
-            - StartTemp: int
-            - EndTemp: int
-            - Duration: str (HH:MM:SS format)
-            - Notes: str
-            
-        NOTE: These dictionaries must be converted to tuples before saving to database!
-        Use the format: (CycleType, StartTemp, EndTemp, Duration, Notes)
-        """
-        valid_entries = []
-        row_count = self.table.rowCount()
-        
-        for row in range(row_count):
+        """Validate and collect all entries from the table."""
+        entries = []
+        for row in range(self.table.rowCount()):
             try:
-                # Get widgets
-                cycle_type_widget = self.table.cellWidget(row, 0)
-                start_temp_widget = self.table.cellWidget(row, 1)
-                end_temp_widget = self.table.cellWidget(row, 2)
-                cycle_time_widget = self.table.cellWidget(row, 3)
-                notes_widget = self.table.cellWidget(row, 4)
+                # Get widgets from correct columns (shifted right by 1 due to add button)
+                cycle_type = self.table.cellWidget(row, 1)  # Was 0, now 1
+                start_temp = self.table.cellWidget(row, 2)  # Was 1, now 2
+                end_temp = self.table.cellWidget(row, 3)    # Was 2, now 3
+                cycle_time = self.table.cellWidget(row, 4)  # Was 3, now 4
+                notes = self.table.cellWidget(row, 5)       # Was 4, now 5
                 
-                # Skip if no widgets
-                if not all([cycle_type_widget, start_temp_widget, end_temp_widget, cycle_time_widget]):
-                    continue
-                    
-                # Get values
-                cycle_type = cycle_type_widget.currentText()
-                start_temp_text = start_temp_widget.text().strip()
-                end_temp_text = end_temp_widget.text().strip()
-                cycle_time_text = cycle_time_widget.text().strip()
-                notes_text = notes_widget.text().strip() if notes_widget else ""
-                
-                # Skip empty rows
-                if not all([cycle_type, start_temp_text, end_temp_text, cycle_time_text]):
-                    continue
-                    
-                # Validate time format
-                if not validate_time_format(cycle_time_text):
+                # Validate cycle type
+                if not cycle_type.currentText():
                     if show_warnings:
-                        QMessageBox.warning(self, "Error", f"Invalid time format in row {row + 1}. Use HH:MM:SS")
+                        QMessageBox.warning(self, "Validation Error", f"Row {row + 1}: Cycle type is required")
                     return None
                     
                 # Validate temperatures
                 try:
-                    start_temp = int(start_temp_text)
-                    end_temp = int(end_temp_text)
-                    
-                    if not (validate_temperature(start_temp) and validate_temperature(end_temp)):
-                        if show_warnings:
-                            QMessageBox.warning(self, "Error", f"Invalid temperature in row {row + 1}")
-                        return None
-                            
-                    # Add valid entry
-                    valid_entries.append({
-                        'CycleType': cycle_type,
-                        'StartTemp': start_temp,
-                        'EndTemp': end_temp,
-                        'Duration': cycle_time_text,
-                        'Notes': notes_text
-                    })
-                    
+                    start_temp_val = float(start_temp.text())
+                    end_temp_val = float(end_temp.text())
                 except ValueError:
                     if show_warnings:
-                        QMessageBox.warning(self, "Error", f"Invalid temperature format in row {row + 1}")
+                        QMessageBox.warning(self, "Validation Error", 
+                                          f"Row {row + 1}: Start and End temperatures must be numbers")
                     return None
                     
+                # Validate time format and non-zero duration
+                time_text = cycle_time.text()
+                if not self.validate_time_format(time_text):
+                    if show_warnings:
+                        QMessageBox.warning(self, "Validation Error", 
+                                          f"Row {row + 1}: Time must be in format HH:MM:SS")
+                    return None
+                
+                # Check for zero duration
+                if time_text == "00:00:00":
+                    if show_warnings:
+                        QMessageBox.warning(self, "Validation Error", 
+                                          f"Row {row + 1}: Duration cannot be zero")
+                    return None
+                    
+                # Collect entry
+                entry = {
+                    'CycleType': cycle_type.currentText(),
+                    'StartTemp': start_temp_val,
+                    'EndTemp': end_temp_val,
+                    'CycleTime': time_text,
+                    'Notes': notes.text()
+                }
+                entries.append(entry)
+                
             except Exception as e:
                 logger.error(f"Row {row}: Error - {str(e)}")
-                continue
+                if show_warnings:
+                    QMessageBox.warning(self, "Error", f"Error processing row {row + 1}: {str(e)}")
+                return None
                 
-        if not valid_entries:
-            if show_warnings:
-                QMessageBox.warning(self, "Error", "No valid entries to save. Please check all required fields.")
-            return None
-                
-        return valid_entries
+        return entries
 
     def save_as_schedule(self):
         try:
@@ -364,7 +379,7 @@ class schedule_window(QDialog):
                         entry['CycleType'],
                         entry['StartTemp'],
                         entry['EndTemp'],
-                        entry['Duration'],
+                        entry['CycleTime'],
                         entry.get('Notes', '')
                     ) for entry in entries]
                     
@@ -391,7 +406,7 @@ class schedule_window(QDialog):
                         entry['CycleType'],
                         entry['StartTemp'],
                         entry['EndTemp'],
-                        entry['Duration'],
+                        entry['CycleTime'],
                         entry.get('Notes', '')
                     ) for entry in entries]
                     
@@ -445,45 +460,6 @@ class schedule_window(QDialog):
         except Exception as e:
             logger.error(f"Error in auto_populate_first_row: {e}")
 
-    def load_data(self, data):
-        """Load schedule data into the table."""
-        try:
-            # Clear existing rows
-            while self.table.rowCount() > 1:
-                self.table.removeRow(1)
-                
-            # Add rows for data plus one extra for new entries
-            while self.table.rowCount() < len(data) + 1:
-                self.add_row()
-                
-            # Fill existing data
-            for i, entry in enumerate(data):
-                cycle_type = self.table.cellWidget(i, 0)
-                start_temp = self.table.cellWidget(i, 1)
-                end_temp = self.table.cellWidget(i, 2)
-                cycle_time = self.table.cellWidget(i, 3)
-                notes = self.table.cellWidget(i, 4)
-                
-                if all([cycle_type, start_temp, end_temp, cycle_time, notes]):
-                    cycle_type.setCurrentText(entry['CycleType'])
-                    start_temp.setText(str(entry['StartTemp']))
-                    end_temp.setText(str(entry['EndTemp']))
-                    cycle_time.setText(entry['CycleTime'])
-                    notes.setText(entry.get('Notes', ''))
-                
-            # Add this line to trigger graph update
-            self.parent().update_graph()  # Assuming the graph update method is in the parent
-            
-        except Exception as e:
-            print(f"Error loading data: {e}")
-            raise
-
-    def exec_(self):
-        """Override exec_ to handle test mode."""
-        if self.test_mode:
-            return QDialog.Accepted
-        return super().exec_()
-
     def load_schedule(self, schedule_name):
         """Load an existing schedule into the table."""
         logger.debug(f"Loading schedule: {schedule_name}")
@@ -500,58 +476,33 @@ class schedule_window(QDialog):
             self.table.setRowCount(0)
             
             # Add rows for each cycle
+            last_row = -1  # Start with -1 so first add_row will be at position 0
             for row_data in data:
                 logger.debug(f"Processing row: {row_data}")
-                row = self.add_row()
+                self.add_row(last_row)  # Pass the position
+                current_row = last_row + 1
+                last_row = current_row
                 
                 # Set data in the new row
-                cycle_type = self.table.cellWidget(row, 0)
-                start_temp = self.table.cellWidget(row, 1)
-                end_temp = self.table.cellWidget(row, 2)
-                cycle_time = self.table.cellWidget(row, 3)
-                notes = self.table.cellWidget(row, 4)
+                cycle_type = self.table.cellWidget(current_row, 1)
+                start_temp = self.table.cellWidget(current_row, 2)
+                end_temp = self.table.cellWidget(current_row, 3)
+                cycle_time = self.table.cellWidget(current_row, 4)
+                notes = self.table.cellWidget(current_row, 5)
                 
                 cycle_type.setCurrentText(row_data['CycleType'])
                 start_temp.setText(str(row_data['StartTemp']))
                 end_temp.setText(str(row_data['EndTemp']))
-                cycle_time.setText(str(row_data['CycleTime']))
-                notes.setText(str(row_data.get('Notes', '')))
+                cycle_time.setText(row_data['CycleTime'])
+                notes.setText(row_data.get('Notes', ''))
                 
-                logger.debug(f"Row {row} populated with data")
-            
             return True
-            
         except Exception as e:
             logger.error(f"Error loading schedule: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error", f"Failed to load schedule: {str(e)}")
-            return False
+            raise
 
-    def add_empty_row(self):
-        """Add an empty row to the table."""
-        logger.debug("Adding empty row to table")
-        current_row = self.table.rowCount()
-        self.table.insertRow(current_row)
-        
-        # Create widgets for the new row
-        cycle_type = QComboBox()
-        cycle_type.addItems(["", "Ramp", "Soak"])
-        cycle_type.setStyleSheet(get_combo_style())
-        
-        start_temp = QLineEdit()
-        end_temp = QLineEdit()
-        cycle_time = QLineEdit()
-        notes = QLineEdit()
-        
-        # Add widgets to the row
-        self.table.setCellWidget(current_row, 0, cycle_type)
-        self.table.setCellWidget(current_row, 1, start_temp)
-        self.table.setCellWidget(current_row, 2, end_temp)
-        self.table.setCellWidget(current_row, 3, cycle_time)
-        self.table.setCellWidget(current_row, 4, notes)
-        
-        # Add the + button in the last column
-        add_btn = QPushButton("+")
-        add_btn.clicked.connect(self.add_empty_row)
-        self.table.setCellWidget(current_row, 5, add_btn)
-        
-        logger.debug(f"Empty row added at index {current_row}")
+    def exec_(self):
+        """Override exec_ to handle test mode."""
+        if self.test_mode:
+            return QDialog.Accepted
+        return super().exec_()

@@ -188,3 +188,71 @@ CREATE TABLE IF NOT EXISTS schedule_entries (
         ON DELETE CASCADE
 )
 ```
+
+### Fixed
+- Bug: Schedule operations not working with new database structure
+  - Fixed schedule listing and deletion methods to use new tables
+  - Updated fetch_all_schedules and delete_schedule methods
+
+Before:
+```python
+@classmethod
+def fetch_all_schedules(cls) -> List[str]:
+    try:
+        with cls.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = cursor.fetchall()
+            return [table[0] for table in tables if table[0] not in ['sqlite_sequence']]
+    except Exception as e:
+        logger.error(f"Error fetching schedules: {e}", exc_info=True)
+        return []
+
+@classmethod
+def delete_schedule(cls, schedule_name: str) -> bool:
+    try:
+        with cls.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"DROP TABLE IF EXISTS {schedule_name}")
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting schedule: {e}", exc_info=True)
+        return False
+```
+
+After:
+```python
+@classmethod
+def fetch_all_schedules(cls) -> List[str]:
+    """Fetch all schedule names from the database."""
+    try:
+        with cls.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM schedules ORDER BY name")
+            return [row[0] for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"Error fetching schedules: {e}", exc_info=True)
+        return []
+
+@classmethod
+def delete_schedule(cls, schedule_name: str) -> bool:
+    """Delete a schedule from the database."""
+    try:
+        with cls.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM schedules WHERE name = ?", (schedule_name,))
+            conn.commit()
+            logger.debug(f"Successfully deleted schedule: {schedule_name}")
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting schedule '{schedule_name}': {e}", exc_info=True)
+        return False
+```
+
+Key Changes:
+- fetch_all_schedules now queries schedules table instead of sqlite_master
+- delete_schedule uses DELETE instead of DROP TABLE
+- Added proper error handling and logging
+- Implemented proper SQL parameterization for safety
+- Leverages foreign key CASCADE for automatic cleanup

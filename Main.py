@@ -31,13 +31,14 @@ class MainWindow(QWidget):
         self.start_cycle_time = None
         self.current_schedule = []
         
-        # Add these lines to load the first schedule by default
+        # Initialize UI first
+        self.init_ui()
+        self.apply_theme()
+        
+        # Then load schedules after UI is ready
         schedules = DatabaseManager.fetch_all_schedules()
         if schedules:
             self.load_schedule(schedules[0])  # Load the first available schedule
-        
-        self.init_ui()
-        self.apply_theme()
 
     def init_ui(self):
         # Define font family based on OS
