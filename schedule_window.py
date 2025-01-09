@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QDialog, QTableWidget, QTableWidgetItem, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QInputDialog, QMessageBox,
-                            QComboBox)
+                            QComboBox, QLineEdit)
 from styles import (ThemeManager, get_dialog_style, get_button_style, 
                    get_table_style, get_combo_style)
 from database import DatabaseManager
@@ -81,31 +81,42 @@ class ScheduleWindow(QDialog):
         layout.addLayout(button_layout)
         self.setLayout(layout)
 
+        # Connect first row cycle type changes to auto-population
+        first_row_cycle_type = self.table.cellWidget(0, 0)
+        if first_row_cycle_type:
+            first_row_cycle_type.currentTextChanged.connect(self.auto_populate_first_row)
+
     def setup_row(self, row, data=None):
+        """Set up a row in the schedule table."""
         # Create and set up the combo box for cycle type
         cycle_type_combo = QComboBox()
         cycle_type_combo.addItem("")  # Empty item first
         cycle_type_combo.addItems(["Ramp", "Soak"])
-        
-        # Apply theme-aware style to combo box
-        theme = ThemeManager.get_current_theme()
-        text_color = theme['text'] if theme['name'] == 'Light Industrial' else '#E0E0E0'
         cycle_type_combo.setStyleSheet(get_combo_style())
-        
-        # Connect the combo box change event
-        cycle_type_combo.currentTextChanged.connect(lambda: self.on_cycle_type_changed(row))
-        
         self.table.setCellWidget(row, 0, cycle_type_combo)
+
+        # Create line edits for temperature and time
+        start_temp_edit = QLineEdit()
+        end_temp_edit = QLineEdit()
+        cycle_time_edit = QLineEdit()
+        notes_edit = QLineEdit()
+
+        # Set up widgets in cells
+        self.table.setCellWidget(row, 1, start_temp_edit)
+        self.table.setCellWidget(row, 2, end_temp_edit)
+        self.table.setCellWidget(row, 3, cycle_time_edit)
+        self.table.setCellWidget(row, 4, notes_edit)
 
         if data:
             cycle_type_combo.setCurrentText(str(data[0]))
-            for col in range(1, 5):
-                item = QTableWidgetItem(str(data[col]))
-                self.table.setItem(row, col, item)
-        else:
-            # Initialize empty cells
-            for col in range(1, 5):
-                self.table.setItem(row, col, QTableWidgetItem(""))
+            start_temp_edit.setText(str(data[1]))
+            end_temp_edit.setText(str(data[2]))
+            cycle_time_edit.setText(str(data[3]))
+            notes_edit.setText(str(data[4]))
+
+        # Connect first row cycle type changes to auto-population
+        if row == 0:
+            cycle_type_combo.currentTextChanged.connect(self.auto_populate_first_row)
 
     def add_row(self):
         current_row = self.table.rowCount()
@@ -286,6 +297,16 @@ class ScheduleWindow(QDialog):
         except Exception as e:
             print(f"Error saving schedule: {str(e)}")  # Debug print
             QMessageBox.critical(self, "Error", f"Failed to save schedule: {str(e)}")
+
+    def auto_populate_first_row(self, cycle_type):
+        """Auto-populate default values for first row when cycle type changes."""
+        if cycle_type in ["Ramp", "Soak"]:
+            start_temp_edit = self.table.cellWidget(0, 1)
+            cycle_time_edit = self.table.cellWidget(0, 3)
+            
+            if start_temp_edit and cycle_time_edit:
+                start_temp_edit.setText(str(DEFAULT_TEMP))
+                cycle_time_edit.setText(DEFAULT_TIME)
 
 def save_schedule(schedule_name, entries):
     try:

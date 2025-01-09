@@ -78,3 +78,28 @@ def test_default_values(qtbot):
     assert cycle_time_input.text() == DEFAULT_TIME
     
     window.close() 
+
+def test_first_row_auto_population(qtbot):
+    """Test that first row auto-populates correctly when cycle type changes."""
+    window = ScheduleWindow()
+    qtbot.addWidget(window)
+    
+    # Get first row widgets
+    first_row = 0
+    cycle_type_combo = window.table.cellWidget(first_row, 0)
+    start_temp_input = window.table.cellWidget(first_row, 1)
+    cycle_time_input = window.table.cellWidget(first_row, 3)
+    
+    # Test Ramp defaults
+    cycle_type_combo.setCurrentText('Ramp')
+    qtbot.wait(100)  # Allow for event processing
+    assert start_temp_input.text() == str(DEFAULT_TEMP), "Start temp should be default for Ramp"
+    assert cycle_time_input.text() == DEFAULT_TIME, "Cycle time should be default for Ramp"
+    
+    # Test Soak defaults
+    cycle_type_combo.setCurrentText('Soak')
+    qtbot.wait(100)  # Allow for event processing
+    assert start_temp_input.text() == str(DEFAULT_TEMP), "Start temp should be default for Soak"
+    assert cycle_time_input.text() == DEFAULT_TIME, "Cycle time should be default for Soak"
+    
+    window.close() 
