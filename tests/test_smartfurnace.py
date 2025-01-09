@@ -371,3 +371,39 @@ def test_validators(qtbot):
     assert validate_time_format(cycle_time.text())
     
     window.close() 
+
+def test_graph_regeneration(qtbot):
+    """Test that graph updates correctly with schedule data."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    
+    try:
+        # Create a test schedule
+        test_data = [{
+            'CycleType': 'Ramp',
+            'StartTemp': 25,
+            'EndTemp': 100,
+            'CycleTime': '01:00:00',
+            'Notes': 'Test ramp'
+        }]
+        DatabaseManager.save_schedule("Test Graph Schedule", test_data)
+        
+        # Update menu and select our test schedule
+        window.update_schedule_menu()
+        window.combo.setCurrentText("Test Graph Schedule")
+        qtbot.wait(100)
+        
+        # Verify graph data
+        assert window.current_schedule is not None
+        assert len(window.current_schedule) > 0
+        assert window.current_schedule[0]['StartTemp'] == 25
+        assert window.current_schedule[0]['EndTemp'] == 100
+        assert window.current_schedule[0]['CycleTime'] == '01:00:00'
+        
+        # Clean up
+        DatabaseManager.delete_schedule("Test Graph Schedule")
+        
+    finally:
+        window.close()
+        window.deleteLater()
+        QApplication.processEvents() 
