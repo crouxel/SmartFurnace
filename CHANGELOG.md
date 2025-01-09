@@ -144,3 +144,47 @@ Removed redundant regenerate_graph() method
 Consolidated all graph updates into update_graph()
 Added automatic schedule loading at startup
 Added graph update trigger after schedule data load
+
+## [Unreleased]
+### Changed
+- Refactored database structure to use a more robust two-table system
+  - `schedules` table stores schedule metadata (name, created/modified dates)
+  - `schedule_entries` table stores individual cycle entries with foreign key to schedules
+  - Removed old per-schedule table approach for better data integrity
+  - Fixed issue where schedule updates weren't persisting
+  - Added proper position tracking for cycle order
+
+Before:
+```sql
+CREATE TABLE IF NOT EXISTS {schedule_name} (
+    id INTEGER PRIMARY KEY,
+    CycleType TEXT,
+    StartTemp INTEGER,
+    EndTemp INTEGER,
+    CycleTime TEXT,
+    Notes TEXT
+)
+```
+
+After:
+```sql
+CREATE TABLE IF NOT EXISTS schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    modified_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS schedule_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id INTEGER,
+    cycle_type TEXT NOT NULL,
+    start_temp INTEGER NOT NULL,
+    end_temp INTEGER NOT NULL,
+    duration TEXT NOT NULL,
+    notes TEXT,
+    position INTEGER,
+    FOREIGN KEY (schedule_id) REFERENCES schedules (id)
+        ON DELETE CASCADE
+)
+```

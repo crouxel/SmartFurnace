@@ -85,16 +85,13 @@ class DatabaseManager:
     def fetch_all_schedules(cls) -> List[str]:
         """Fetch all schedule names from the database."""
         try:
-            conn = sqlite3.connect(cls.DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-            return [row[0] for row in cursor.fetchall()]
-        except sqlite3.Error as e:
-            logger.error(f"Error fetching schedules: {e}")
+            with cls.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM schedules ORDER BY name")
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error fetching schedules: {e}", exc_info=True)
             return []
-        finally:
-            if conn:
-                conn.close()
 
     @classmethod
     def save_schedule(cls, name: str, entries: List[Tuple]) -> bool:
@@ -146,17 +143,19 @@ class DatabaseManager:
     def delete_schedule(cls, schedule_name: str) -> bool:
         """Delete a schedule from the database."""
         try:
-            conn = sqlite3.connect(cls.DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute(f"DROP TABLE IF EXISTS {schedule_name}")
-            conn.commit()
-            return True
-        except sqlite3.Error as e:
-            logger.error(f"Error deleting schedule '{schedule_name}': {e}")
+            with cls.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Delete from schedules table (cascade will handle entries)
+                cursor.execute("DELETE FROM schedules WHERE name = ?", (schedule_name,))
+                conn.commit()
+                
+                logger.debug(f"Successfully deleted schedule: {schedule_name}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error deleting schedule '{schedule_name}': {e}", exc_info=True)
             return False
-        finally:
-            if conn:
-                conn.close()
 
     @classmethod
     def load_schedule(cls, schedule_name: str) -> List[Dict]:
@@ -203,3 +202,28 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error loading schedule '{schedule_name}': {e}", exc_info=True)
             return None
+
+    @classmethod
+    def diagnose_database(cls):
+        """Temporary diagnostic method to check database state."""
+        try:
+            with cls.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # List all tables
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                tables = cursor.fetchall()
+                logger.info(f"Existing tables: {tables}")
+                
+                # Check schedules table
+                cursor.execute("SELECT * FROM schedules;")
+                schedules = cursor.fetchall()
+                logger.info(f"Existing schedules: {schedules}")
+                
+                # Check schedule_entries
+                cursor.execute("SELECT * FROM schedule_entries;")
+                entries = cursor.fetchall()
+                logger.info(f"Existing entries: {entries}")
+                
+        except Exception as e:
+            logger.error(f"Diagnostic error: {e}", exc_info=True)

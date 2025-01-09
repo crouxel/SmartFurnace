@@ -478,6 +478,9 @@ def fetch_schedule_data(table_name):
 # Initialize the QApplication instance
 app = QApplication(sys.argv)
 
+# Initialize database
+DatabaseManager.initialize_database()
+
 # Create and show the main window
 window = MainWindow()
 window.show()
