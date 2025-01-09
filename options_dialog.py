@@ -3,6 +3,8 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                            QWidget)
 from styles import Theme, ThemeManager, get_combo_style, get_button_style
 from PyQt5.QtCore import QSize
+from constants import (COMPANY_NAME, APP_NAME, STYLE_DEFAULTS, 
+                      PADDING, BORDER_RADIUS)
 
 class OptionsDialog(QDialog):
     def __init__(self, parent=None):
@@ -13,7 +15,26 @@ class OptionsDialog(QDialog):
         
     def init_ui(self):
         theme = ThemeManager.get_current_theme()
-        self.setStyleSheet(f"background-color: {theme['background']};")
+        # Set dialog background and text color
+        text_color = '#212121' if theme['name'] == 'Light Industrial' else '#E0E0E0'
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {theme['background']};
+            }}
+            QLabel {{
+                color: {text_color};
+            }}
+            QLineEdit {{
+                background-color: {theme['surface']};
+                color: {text_color};
+                border: 1px solid {theme['border']};
+                padding: 5px;
+                border-radius: 4px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {theme['primary']};
+            }}
+        """)
         
         layout = QVBoxLayout()
         
@@ -22,7 +43,7 @@ class OptionsDialog(QDialog):
         theme_layout = QHBoxLayout()
         
         theme_label = QLabel("Theme:")
-        theme_label.setStyleSheet(f"color: {theme['text']};")
+        theme_label.setStyleSheet(f"color: {text_color};")
         
         self.theme_combo = QComboBox()
         self.theme_combo.setStyleSheet(get_combo_style())
@@ -59,10 +80,11 @@ class OptionsDialog(QDialog):
     
     def create_group_box(self, title):
         theme = ThemeManager.get_current_theme()
+        text_color = '#212121' if theme['name'] == 'Light Industrial' else '#E0E0E0'
         group = QGroupBox(title)
         group.setStyleSheet(f"""
             QGroupBox {{
-                color: {theme['text']};
+                color: {text_color};
                 border: 1px solid {theme['border']};
                 border-radius: 4px;
                 margin-top: 8px;

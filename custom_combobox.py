@@ -1,6 +1,9 @@
 from PyQt5.QtWidgets import QComboBox, QMenu
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QMouseEvent
+from PyQt5.QtCore import QObject
+from styles import ThemeManager
+from constants import PADDING, BORDER_RADIUS, STYLE_DEFAULTS
 
 class CustomComboBox(QComboBox):
     def __init__(self, parent=None):
@@ -12,7 +15,23 @@ class CustomComboBox(QComboBox):
         
     def set_context_menu(self, menu):
         self._context_menu = menu
-        print("Menu set")
+        theme = ThemeManager.get_current_theme()
+        text_color = theme['text'] if theme['name'] == 'Light Industrial' else '#E0E0E0'
+        
+        # Style the context menu
+        self._context_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {theme['surface']};
+                color: {text_color};
+                border: 1px solid {theme['border']};
+                padding: {STYLE_DEFAULTS['padding']};
+                border-radius: {STYLE_DEFAULTS['border_radius']};
+            }}
+            QMenu::item:selected {{
+                background-color: {theme['primary']};
+            }}
+        """)
+        print("Menu set and styled")
         
     def eventFilter(self, obj, event):
         if obj == self.view().viewport():

@@ -10,12 +10,16 @@ from custom_combobox import CustomComboBox
 from styles import (get_label_style, get_temp_display_style, get_button_style, 
                    get_combo_style, get_time_label_style, get_plot_theme, 
                    ThemeManager, get_theme_dependent_styles)
-from database import fetch_all_schedules
+from database import DatabaseManager
 from options_dialog import OptionsDialog
+from constants import (WINDOW_SIZE, BUTTON_WIDTH, COMBO_WIDTH, 
+                      PLOT_UPDATE_INTERVAL, MAX_PLOT_POINTS, 
+                      DEFAULT_TEMP, ERROR_MESSAGES)
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
+        self.setGeometry(100, 100, *WINDOW_SIZE)
         ThemeManager.initialize()  # Initialize theme from saved settings
         self.start_cycle_time = None
         self.current_schedule = []
@@ -56,7 +60,7 @@ class MainWindow(QWidget):
         
         # Create start button with fixed width
         self.start_button = QPushButton("Start Cycle")
-        self.start_button.setFixedWidth(100)  # Set fixed width
+        self.start_button.setFixedWidth(BUTTON_WIDTH)
         self.start_button.setStyleSheet(get_button_style(embossed=True))
         self.start_button.clicked.connect(self.write_start_cycle_time)
         
@@ -77,9 +81,9 @@ class MainWindow(QWidget):
         
         # Create combo box with smaller fixed width
         self.combo = CustomComboBox(self)
-        self.combo.setFixedWidth(150)  # Reduced width
+        self.combo.setFixedWidth(COMBO_WIDTH)
         self.combo.setStyleSheet(get_combo_style(embossed=True))
-        self.combo.addItems(fetch_all_schedules() + ["Add Schedule"])
+        self.combo.addItems(DatabaseManager.fetch_all_schedules() + ["Add Schedule"])
         self.combo.currentIndexChanged.connect(self.on_table_select)
         
         # Create and set the context menu
@@ -200,7 +204,7 @@ class MainWindow(QWidget):
     def update_schedule_menu(self):
         current_text = self.combo.currentText()
         self.combo.clear()
-        schedules = fetch_all_schedules()
+        schedules = DatabaseManager.fetch_all_schedules()
         self.combo.addItems(schedules)
         self.combo.insertSeparator(len(schedules))
         self.combo.addItem("Add Schedule")
@@ -365,16 +369,11 @@ class MainWindow(QWidget):
         self.combo.setCurrentIndex(0)  # Select the first valid schedule
 
     def delete_table(self, table_name):
-        try:
-            conn = sqlite3.connect('SmartFurnace.db')
-            cursor = conn.cursor()
-            cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-            conn.commit()
-            conn.close()
+        if DatabaseManager.delete_schedule(table_name):
             print(f"Table {table_name} deleted successfully.")
             self.update_schedule_menu()
-        except sqlite3.OperationalError as e:
-            print(f"Error deleting table {table_name}: {e}")
+        else:
+            print(f"Error deleting table {table_name}")
 
     def show_options(self):
         dialog = OptionsDialog(self)
