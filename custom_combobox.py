@@ -12,7 +12,7 @@ class CustomComboBox(QComboBox):
         self.setup_context_menu()
         
     def setup_context_menu(self):
-        """Set up the context menu with Edit and Delete actions."""
+        """Set up the context menu with Show Code, Edit and Delete actions."""
         self.context_menu.setStyleSheet("""
             QMenu {
                 background-color: #2b2b2b;
@@ -24,11 +24,13 @@ class CustomComboBox(QComboBox):
             }
         """)
         
-        # Add Edit and Delete actions
+        # Add Show Code, Edit and Delete actions
+        show_code_action = self.context_menu.addAction("Show Code")
         edit_action = self.context_menu.addAction("Edit")
         delete_action = self.context_menu.addAction("Delete")
         
         # Connect actions to parent window methods
+        show_code_action.triggered.connect(lambda: self.parent().show_furnace_commands(self.currentText()))
         edit_action.triggered.connect(lambda: self.parent().edit_schedule())
         delete_action.triggered.connect(lambda: self.parent().delete_schedule())
     

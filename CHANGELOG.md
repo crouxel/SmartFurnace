@@ -12,6 +12,12 @@
   - Relocated under temperature display
   - Enhanced spacing and readability
   - Auto-updates from start_cycle_time.txt
+- Furnace Commands Display
+  - Added "Show Code" option to schedule context menu
+  - New window showing programming commands for furnace controller
+  - Configurable initial program number (0-99)
+  - Automatic command generation for temperature and time settings
+  - Maintains consistent theme with main application
 
 ### Fixed
 - Bug: Schedule loads but graph doesn't update on GUI open

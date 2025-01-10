@@ -19,6 +19,7 @@ import platform
 import logging
 from schedule_window import schedule_window
 import os
+from furnace_commands import FurnaceCommandsWindow
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,12 @@ class MainWindow(QWidget):
         schedules = DatabaseManager.fetch_all_schedules()
         if schedules:
             self.load_schedule(schedules[0])
+        
+        # Set initial button state based on whether cycle is running
+        if self.start_cycle_time and self.timer.isActive():
+            self.start_button.setText("Stop Cycle")
+        else:
+            self.start_button.setText("Start Cycle")
 
     def init_ui(self):
         # Create main layout
@@ -411,16 +418,21 @@ class MainWindow(QWidget):
             self.load_schedule(selected_table)
 
     def show_context_menu(self, position):
-        """Show context menu for schedule operations."""
+        """Show context menu for schedule selector."""
+        menu = QMenu()
         current_text = self.combo.currentText()
+        
         if current_text and current_text != "Add Schedule":
-            menu = QMenu()
+            # Add all actions in the simple, working style
+            show_code_action = menu.addAction("Show Code")
             edit_action = menu.addAction("Edit")
             delete_action = menu.addAction("Delete")
             
             action = menu.exec_(self.combo.mapToGlobal(position))
             
-            if action == edit_action:
+            if action == show_code_action:
+                self.show_furnace_commands(current_text)
+            elif action == edit_action:
                 self.edit_schedule()
             elif action == delete_action:
                 self.delete_schedule()
@@ -566,25 +578,24 @@ class MainWindow(QWidget):
         """Handle start button click."""
         if not self.timer.isActive():
             # Write new time and update start_cycle_time
-            self.write_start_cycle_time(datetime.now())
+            current_time = datetime.now()
+            self.write_start_cycle_time(current_time)
             
-            # Update start time display with AM/PM
-            self.startTimeDisplay.setText(f"Start: {self.start_cycle_time.strftime('%I:%M:%S %p')}")
+            # Update start time display
+            self.startTimeDisplay.setText(f"Start: {current_time.strftime('%I:%M:%S %p')}")
             
             # Calculate and update end time display
-            total_minutes = sum(self.time_to_minutes(cycle['CycleTime']) for cycle in self.current_schedule)
-            end_time = self.start_cycle_time + timedelta(minutes=total_minutes)
-            self.endTimeDisplay.setText(f"End: {end_time.strftime('%I:%M:%S %p')}")
+            if self.current_schedule:
+                total_minutes = sum(self.time_to_minutes(cycle['CycleTime']) for cycle in self.current_schedule)
+                end_time = current_time + timedelta(minutes=total_minutes)
+                self.endTimeDisplay.setText(f"End: {end_time.strftime('%I:%M:%S %p')}")
             
             self.timer.start(PLOT_UPDATE_INTERVAL)
             self.start_button.setText("Stop Cycle")
         else:
             self.timer.stop()
             self.start_button.setText("Start Cycle")
-            # Reset displays when stopped
-            self.startTimeDisplay.setText("Start: --:--:--")
-            self.currentTimeDisplay.setText("Current: --:--:--")
-            self.endTimeDisplay.setText("End: --:--:--")
+            self.reset_displays()
 
     def get_app_data_dir(self):
         """Get the appropriate app data directory based on OS."""
@@ -612,6 +623,12 @@ class MainWindow(QWidget):
         self.currentTimeDisplay.setText("Current: --:--:--")
         self.endTimeDisplay.setText("End: --:--:--")
         self.temp_display.setText("--°C")
+
+    def show_furnace_commands(self, schedule_name):
+        """Show the furnace commands window."""
+        if self.current_schedule:
+            dialog = FurnaceCommandsWindow(self, self.current_schedule)
+            dialog.exec_()
 
 def fetch_schedule_data(table_name):
     try:
