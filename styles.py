@@ -139,11 +139,10 @@ def get_time_label_style(theme=None):
         color: {text_color};
         background-color: {theme['surface']};
         border: 1px solid {theme['border']};
-        padding: 2px 8px;
+        padding: 4px 12px;
         font-family: 'Consolas', monospace;
-        font-size: 12px;
-        min-width: 100px;
-        max-width: 100px;
+        font-size: 13px;
+        min-width: 150px;
         border-radius: 4px;
     """
 

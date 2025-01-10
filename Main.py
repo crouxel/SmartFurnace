@@ -68,31 +68,32 @@ class MainWindow(QWidget):
         else:
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
 
-        # Time displays with consistent naming
-        self.startTimeDisplay = QLabel("Start: --:--:--")
-        self.currentTimeDisplay = QLabel("Current: --:--:--")
-        self.endTimeDisplay = QLabel("End: --:--:--")
-        
-        # Apply styles
-        self.startTimeDisplay.setStyleSheet(get_time_label_style())
-        self.currentTimeDisplay.setStyleSheet(get_time_label_style())
-        self.endTimeDisplay.setStyleSheet(get_time_label_style())
-        
-        # Create time layout
-        time_layout = QHBoxLayout()
-        time_layout.addWidget(self.startTimeDisplay)
-        time_layout.addWidget(self.currentTimeDisplay)
-        time_layout.addWidget(self.endTimeDisplay)
-        time_layout.addStretch()
-        
-        # Setup other layouts
+        # Setup other layouts first
         top_layout = self.setup_top_layout()
         temp_display_layout, self.temp_display = self.setup_temp_display(font_family)
         
+        # Time displays with consistent naming
+        self.startTimeDisplay = QLabel("Start: --:--:-- --")
+        self.currentTimeDisplay = QLabel("Current: --:--:-- --")
+        self.endTimeDisplay = QLabel("End: --:--:-- --")
+        
+        # Apply styles
+        for display in [self.startTimeDisplay, self.currentTimeDisplay, self.endTimeDisplay]:
+            display.setStyleSheet(get_time_label_style())
+            display.setAlignment(Qt.AlignCenter)
+        
+        # Create time layout with even spacing
+        time_layout = QHBoxLayout()
+        time_layout.addWidget(self.startTimeDisplay)
+        time_layout.addStretch()
+        time_layout.addWidget(self.currentTimeDisplay)
+        time_layout.addStretch()
+        time_layout.addWidget(self.endTimeDisplay)
+        
         # Add all layouts to main layout in correct order
         main_layout.addLayout(top_layout)
-        main_layout.addLayout(time_layout)
         main_layout.addLayout(temp_display_layout)
+        main_layout.addLayout(time_layout)
         
         # Setup plot widget
         self.plot_widget = pg.PlotWidget()
@@ -111,8 +112,24 @@ class MainWindow(QWidget):
         options_layout.addStretch()
         
         options_button = QPushButton()
-        icon = QIcon("gear-icon.svg")
-        options_button.setIcon(icon)
+        
+        # Get the correct path for the gear icon
+        if getattr(sys, 'frozen', False):  # Running as compiled
+            # If running as compiled executable
+            icon_path = os.path.join(sys._MEIPASS, "gear-icon.svg")
+        else:
+            # If running from source
+            icon_path = "gear-icon.svg"
+        
+        # Check if icon exists and set it
+        if os.path.exists(icon_path):
+            icon = QIcon(icon_path)
+            options_button.setIcon(icon)
+        else:
+            # Fallback to text if icon not found
+            options_button.setText("⚙")  # Unicode gear symbol
+            logger.warning(f"Gear icon not found at: {icon_path}")
+        
         options_button.setIconSize(QSize(24, 24))
         options_button.setFixedSize(32, 32)
         options_button.setToolTip("Options")
@@ -121,6 +138,7 @@ class MainWindow(QWidget):
             QPushButton {
                 background-color: transparent;
                 border: none;
+                font-size: 20px;  /* Size for the fallback gear symbol */
             }
             QPushButton:hover {
                 background-color: rgba(255, 255, 255, 0.1);
@@ -307,11 +325,12 @@ class MainWindow(QWidget):
     def update_graph(self):
         """Update the graph with current temperature and schedule."""
         try:
+            # Update current time display
+            current_time = datetime.now()
+            self.currentTimeDisplay.setText(f"Current: {current_time.strftime('%I:%M:%S %p')}")
+            
             # Clear the plot
             self.plot_widget.clear()
-            
-            # Get current time and temperature
-            current_time = datetime.now()
             
             if self.current_schedule and self.start_cycle_time:
                 # Plot schedule
@@ -340,7 +359,7 @@ class MainWindow(QWidget):
                     self.temp_display.setText(f"{current_temp:.1f}°C")
                 
         except Exception as e:
-            print(f"Error updating graph: {e}")
+            logger.error(f"Error updating graph: {e}")
 
     def get_current_temperature(self, elapsed_time):
         """Get the current temperature based on elapsed time."""

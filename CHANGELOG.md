@@ -6,6 +6,12 @@
   - Added yellow dashed vertical line showing current position
   - Helps visualize progress through the schedule
   - Updates in real-time with temperature display
+- Improved time displays
+  - Added current time between start and end time
+  - Converted to 12-hour format with AM/PM
+  - Relocated under temperature display
+  - Enhanced spacing and readability
+  - Auto-updates from start_cycle_time.txt
 
 ### Fixed
 - Bug: Schedule loads but graph doesn't update on GUI open
@@ -14,20 +20,18 @@
   - Consolidated all graph updates into update_graph()
   - Added automatic schedule loading at startup
   - Added graph update trigger after schedule data load
-  - Verified data format consistency across all related files:
-    - Main.py: load_schedule()
-    - schedule_window.py: load_data()
-    - DatabaseManager: save_schedule(), load_schedule()
+  - Verified data format consistency across all related files
 
-### Fixed
 - Bug: Edit schedule gives an error
   - Root cause: Data format inconsistency between files
   - Fixed data format handling in schedule_window.py
-  - Ensured consistent dictionary format: 
-    {'CycleType', 'StartTemp', 'EndTemp', 'CycleTime', 'Notes'}
+  - Ensured consistent dictionary format
   - Added data format validation in load_data()
   - Added debug logging for data format tracking
-  - Lesson learned: Always check ALL files when changing data formats
+
+- Bug: Settings gear icon disappeared
+  - Restored settings button in UI initialization
+  - Maintained icon styling and functionality
 
 ## [1.0.1] - 2024-03-18
 ### Added
