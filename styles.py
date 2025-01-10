@@ -134,16 +134,17 @@ def get_label_style(theme=None):
 def get_time_label_style(theme=None):
     if theme is None:
         theme = ThemeManager.get_current_theme()
-    # Use white/light grey text for dark themes
     text_color = theme['text'] if theme['name'] == 'Light Industrial' else '#E0E0E0'
     return f"""
         color: {text_color};
         background-color: {theme['surface']};
         border: 1px solid {theme['border']};
-        padding: 5px;
+        padding: 2px 8px;
         font-family: 'Consolas', monospace;
-        font-size: 14px;
-        border-radius: 2px;
+        font-size: 12px;
+        min-width: 100px;
+        max-width: 100px;
+        border-radius: 4px;
     """
 
 def get_button_style(embossed=False, theme=None):

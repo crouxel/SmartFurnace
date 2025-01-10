@@ -407,3 +407,11 @@ def test_graph_regeneration(qtbot):
         window.close()
         window.deleteLater()
         QApplication.processEvents() 
+
+def test_time_displays(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    
+    assert window.startTimeDisplay.text() == "Start: --:--:--"
+    assert window.currentTimeDisplay.text() == "Current: --:--:--"
+    assert window.endTimeDisplay.text() == "End: --:--:--" 

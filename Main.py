@@ -18,6 +18,7 @@ from constants import (WINDOW_SIZE, BUTTON_WIDTH, COMBO_WIDTH,
 import platform
 import logging
 from schedule_window import schedule_window
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,14 @@ class MainWindow(QWidget):
         DatabaseManager.initialize_database()
         self.setGeometry(100, 100, *WINDOW_SIZE)
         ThemeManager.initialize()  # Initialize theme from saved settings
-        self.start_cycle_time = None
+        
+        # Setup app data directory
+        self.app_data_dir = self.get_app_data_dir()
+        os.makedirs(self.app_data_dir, exist_ok=True)
+        self.start_time_file = os.path.join(self.app_data_dir, 'start_cycle_time.txt')
+        
+        # Initialize start_cycle_time from file
+        self.start_cycle_time = self.read_start_cycle_time()
         self.current_schedule = []
         
         # Initialize UI first
@@ -38,9 +46,13 @@ class MainWindow(QWidget):
         # Then load schedules after UI is ready
         schedules = DatabaseManager.fetch_all_schedules()
         if schedules:
-            self.load_schedule(schedules[0])  # Load the first available schedule
+            self.load_schedule(schedules[0])
 
     def init_ui(self):
+        # Create main layout
+        main_layout = QVBoxLayout()
+        self.setLayout(main_layout)
+        
         # Define font family based on OS
         if platform.system() == 'Windows':
             font_family = 'Segoe UI'
@@ -56,18 +68,35 @@ class MainWindow(QWidget):
         else:
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
 
-        self.start_button = QPushButton("Start Cycle")
-        self.combo = CustomComboBox()
-        self.label = QLabel()
-        self.label.setStyleSheet(get_label_style())
-        self.plot_widget = pg.PlotWidget()
-
-        # Setup layouts
+        # Time displays with consistent naming
+        self.startTimeDisplay = QLabel("Start: --:--:--")
+        self.currentTimeDisplay = QLabel("Current: --:--:--")
+        self.endTimeDisplay = QLabel("End: --:--:--")
+        
+        # Apply styles
+        self.startTimeDisplay.setStyleSheet(get_time_label_style())
+        self.currentTimeDisplay.setStyleSheet(get_time_label_style())
+        self.endTimeDisplay.setStyleSheet(get_time_label_style())
+        
+        # Create time layout
+        time_layout = QHBoxLayout()
+        time_layout.addWidget(self.startTimeDisplay)
+        time_layout.addWidget(self.currentTimeDisplay)
+        time_layout.addWidget(self.endTimeDisplay)
+        time_layout.addStretch()
+        
+        # Setup other layouts
         top_layout = self.setup_top_layout()
         temp_display_layout, self.temp_display = self.setup_temp_display(font_family)
-        main_layout = self.setup_main_layout(top_layout, temp_display_layout)
-
-        self.setLayout(main_layout)
+        
+        # Add all layouts to main layout in correct order
+        main_layout.addLayout(top_layout)
+        main_layout.addLayout(time_layout)
+        main_layout.addLayout(temp_display_layout)
+        
+        # Setup plot widget
+        self.plot_widget = pg.PlotWidget()
+        main_layout.addWidget(self.plot_widget)
 
         # Set up a timer to update the graph every second
         self.timer = QTimer()
@@ -85,7 +114,7 @@ class MainWindow(QWidget):
         self.start_button = QPushButton("Start Cycle")
         self.start_button.setFixedWidth(BUTTON_WIDTH)
         self.start_button.setStyleSheet(get_button_style(embossed=True))
-        self.start_button.clicked.connect(self.write_start_cycle_time)
+        self.start_button.clicked.connect(self.on_start_button_clicked)
         
         # Add start button to the left
         top_layout.addWidget(self.start_button)
@@ -230,15 +259,21 @@ class MainWindow(QWidget):
         else:
             self.combo.setCurrentIndex(0)
 
-    def write_start_cycle_time(self):
-        self.start_cycle_time = datetime.now()
-        with open('start_cycle_time.txt', 'w') as f:
-            f.write(self.start_cycle_time.isoformat())
+    def write_start_cycle_time(self, time=None):
+        """Write time to start_cycle_time.txt."""
+        try:
+            time_to_write = time if time else datetime.now()
+            with open(self.start_time_file, 'w') as f:
+                f.write(time_to_write.isoformat())
+            self.start_cycle_time = time_to_write
+            logger.debug(f"Wrote start cycle time: {time_to_write}")
+        except Exception as e:
+            logger.error(f"Error writing start cycle time: {e}")
 
     def get_start_cycle_time(self):
         if self.start_cycle_time is None:
             try:
-                with open('start_cycle_time.txt', 'r') as f:
+                with open(self.start_time_file, 'r') as f:
                     self.start_cycle_time = datetime.fromisoformat(f.read().strip())
             except FileNotFoundError:
                 self.start_cycle_time = datetime.now()
@@ -399,13 +434,10 @@ class MainWindow(QWidget):
         self.plot_widget.getAxis('left').setPen(theme['grid'])
 
     def load_schedule(self, schedule_name):
-        """Load a schedule and update the display."""
-        logger.debug(f"Loading schedule: {schedule_name}")
+        """Load a schedule and show its graph."""
         try:
             self.current_schedule = []
             data = DatabaseManager.load_schedule(schedule_name)
-            logger.debug(f"Loaded data from database: {data}")
-            
             if data:
                 for row in data:
                     logger.debug(f"Processing row: {row}")
@@ -422,11 +454,21 @@ class MainWindow(QWidget):
                 self.start_cycle_time = self.get_start_cycle_time()
                 logger.debug(f"Start cycle time: {self.start_cycle_time}")
                 
+                # Initialize time displays
+                if self.start_cycle_time:
+                    self.startTimeDisplay.setText(f"Start: {self.start_cycle_time.strftime('%H:%M:%S')}")
+                    total_minutes = sum(self.time_to_minutes(cycle['CycleTime']) for cycle in self.current_schedule)
+                    end_time = self.start_cycle_time + timedelta(minutes=total_minutes)
+                    self.endTimeDisplay.setText(f"End: {end_time.strftime('%H:%M:%S')}")
+                    self.currentTimeDisplay.setText(f"Current: {datetime.now().strftime('%H:%M:%S')}")
+                
                 logger.debug("Updating graph")
                 self.update_graph()
+                
                 return True
+            return False
         except Exception as e:
-            logger.error(f"Error loading schedule: {e}", exc_info=True)
+            logger.error(f"Error loading schedule: {e}")
             return False
 
     def setup_schedule_selector(self):
@@ -463,6 +505,75 @@ class MainWindow(QWidget):
         if last_schedule:
             self.load_schedule(last_schedule)
             # Remove redundant update_graph() call since load_schedule() already calls it
+
+    def read_start_cycle_time(self):
+        """Read start cycle time from file."""
+        try:
+            with open(self.start_time_file, 'r') as f:
+                return datetime.fromisoformat(f.read().strip())
+        except (FileNotFoundError, ValueError) as e:
+            logger.debug(f"Error reading start time: {e}")
+            # Create file with current time if it doesn't exist
+            current_time = datetime.now()
+            self.write_start_cycle_time(current_time)
+            return current_time
+
+    def on_start_button_clicked(self):
+        """Handle start button click."""
+        logger.debug("Start button clicked")
+        if not self.timer.isActive():
+            logger.debug("Timer not active, starting cycle")
+            # Write new time and update start_cycle_time
+            current_time = datetime.now()
+            self.write_start_cycle_time(current_time)
+            
+            # Update start time display
+            logger.debug(f"Setting start time display to: {current_time}")
+            self.startTimeDisplay.setText(f"Start: {current_time.strftime('%H:%M:%S')}")
+            
+            # Calculate and update end time display
+            total_minutes = sum(self.time_to_minutes(cycle['CycleTime']) for cycle in self.current_schedule)
+            end_time = current_time + timedelta(minutes=total_minutes)
+            logger.debug(f"Setting end time display to: {end_time}")
+            self.endTimeDisplay.setText(f"End: {end_time.strftime('%H:%M:%S')}")
+            
+            self.timer.start(PLOT_UPDATE_INTERVAL)
+            self.start_button.setText("Stop Cycle")
+        else:
+            logger.debug("Timer active, stopping cycle")
+            self.timer.stop()
+            self.start_button.setText("Start Cycle")
+            # Reset displays when stopped
+            self.startTimeDisplay.setText("Start: --:--:--")
+            self.currentTimeDisplay.setText("Current: --:--:--")
+            self.endTimeDisplay.setText("End: --:--:--")
+
+    def get_app_data_dir(self):
+        """Get the appropriate app data directory based on OS."""
+        if getattr(sys, 'frozen', False):  # Running as compiled
+            if platform.system() == 'Windows':
+                return os.path.join(os.environ['APPDATA'], 'SmartFurnace')
+            elif platform.system() == 'Darwin':  # macOS
+                return os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'SmartFurnace')
+            else:  # Linux
+                return os.path.join(os.path.expanduser('~'), '.smartfurnace')
+        else:  # Running from source
+            return os.path.abspath(os.path.dirname(__file__))
+
+    def update_display(self):
+        """Update the display (called by timer)."""
+        if self.timer.isActive():
+            current_time = datetime.now()
+            self.currentTimeDisplay.setText(f"Current: {current_time.strftime('%H:%M:%S')}")
+            self.update_graph()
+            self.update_temperature()
+
+    def reset_displays(self):
+        """Reset all displays to default state."""
+        self.startTimeDisplay.setText("Start: --:--:--")
+        self.currentTimeDisplay.setText("Current: --:--:--")
+        self.endTimeDisplay.setText("End: --:--:--")
+        self.temp_display.setText("--°C")
 
 def fetch_schedule_data(table_name):
     try:
