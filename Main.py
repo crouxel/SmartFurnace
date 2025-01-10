@@ -106,6 +106,31 @@ class MainWindow(QWidget):
         # Initial update to display the current temperature immediately
         self.update_graph()
 
+        # Add options button with SVG icon
+        options_layout = QHBoxLayout()
+        options_layout.addStretch()
+        
+        options_button = QPushButton()
+        icon = QIcon("gear-icon.svg")
+        options_button.setIcon(icon)
+        options_button.setIconSize(QSize(24, 24))
+        options_button.setFixedSize(32, 32)
+        options_button.setToolTip("Options")
+        options_button.clicked.connect(self.show_options)
+        options_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+        
+        options_layout.addWidget(options_button)
+        main_layout.addLayout(options_layout)
+
     def setup_top_layout(self):
         """Set up the top layout with controls."""
         top_layout = QHBoxLayout()
@@ -454,13 +479,13 @@ class MainWindow(QWidget):
                 self.start_cycle_time = self.get_start_cycle_time()
                 logger.debug(f"Start cycle time: {self.start_cycle_time}")
                 
-                # Initialize time displays
+                # Initialize time displays with AM/PM format
                 if self.start_cycle_time:
-                    self.startTimeDisplay.setText(f"Start: {self.start_cycle_time.strftime('%H:%M:%S')}")
+                    self.startTimeDisplay.setText(f"Start: {self.start_cycle_time.strftime('%I:%M:%S %p')}")
                     total_minutes = sum(self.time_to_minutes(cycle['CycleTime']) for cycle in self.current_schedule)
                     end_time = self.start_cycle_time + timedelta(minutes=total_minutes)
-                    self.endTimeDisplay.setText(f"End: {end_time.strftime('%H:%M:%S')}")
-                    self.currentTimeDisplay.setText(f"Current: {datetime.now().strftime('%H:%M:%S')}")
+                    self.endTimeDisplay.setText(f"End: {end_time.strftime('%I:%M:%S %p')}")
+                    self.currentTimeDisplay.setText(f"Current: {datetime.now().strftime('%I:%M:%S %p')}")
                 
                 logger.debug("Updating graph")
                 self.update_graph()
@@ -520,27 +545,21 @@ class MainWindow(QWidget):
 
     def on_start_button_clicked(self):
         """Handle start button click."""
-        logger.debug("Start button clicked")
         if not self.timer.isActive():
-            logger.debug("Timer not active, starting cycle")
             # Write new time and update start_cycle_time
-            current_time = datetime.now()
-            self.write_start_cycle_time(current_time)
+            self.write_start_cycle_time(datetime.now())
             
-            # Update start time display
-            logger.debug(f"Setting start time display to: {current_time}")
-            self.startTimeDisplay.setText(f"Start: {current_time.strftime('%H:%M:%S')}")
+            # Update start time display with AM/PM
+            self.startTimeDisplay.setText(f"Start: {self.start_cycle_time.strftime('%I:%M:%S %p')}")
             
             # Calculate and update end time display
             total_minutes = sum(self.time_to_minutes(cycle['CycleTime']) for cycle in self.current_schedule)
-            end_time = current_time + timedelta(minutes=total_minutes)
-            logger.debug(f"Setting end time display to: {end_time}")
-            self.endTimeDisplay.setText(f"End: {end_time.strftime('%H:%M:%S')}")
+            end_time = self.start_cycle_time + timedelta(minutes=total_minutes)
+            self.endTimeDisplay.setText(f"End: {end_time.strftime('%I:%M:%S %p')}")
             
             self.timer.start(PLOT_UPDATE_INTERVAL)
             self.start_button.setText("Stop Cycle")
         else:
-            logger.debug("Timer active, stopping cycle")
             self.timer.stop()
             self.start_button.setText("Start Cycle")
             # Reset displays when stopped
@@ -564,7 +583,7 @@ class MainWindow(QWidget):
         """Update the display (called by timer)."""
         if self.timer.isActive():
             current_time = datetime.now()
-            self.currentTimeDisplay.setText(f"Current: {current_time.strftime('%H:%M:%S')}")
+            self.currentTimeDisplay.setText(f"Current: {current_time.strftime('%I:%M:%S %p')}")
             self.update_graph()
             self.update_temperature()
 
