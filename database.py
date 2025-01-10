@@ -5,15 +5,26 @@ import logging
 from contextlib import contextmanager
 from version import APP_NAME
 
-# Set up logging to file in AppData
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(os.getenv('APPDATA'), APP_NAME, 'smartfurnace.log')),
-        logging.StreamHandler()
-    ]
-)
+# Create Windows app data directory
+app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), APP_NAME)
+os.makedirs(app_data_dir, exist_ok=True)
+
+# Setup logging with error handling
+log_file = os.path.join(app_data_dir, 'smartfurnace.log')
+try:
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+except Exception as e:
+    # Fallback to console logging if file logging fails
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    logging.warning(f"Failed to create log file: {e}")
+
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
